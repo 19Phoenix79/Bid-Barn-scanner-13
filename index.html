@@ -1,91 +1,77 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bid Barn Scanner</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Bid Barn – Pallet Scanner</title>
   <link rel="stylesheet" href="./styles.css" />
-  <link rel="icon" href="./favicon.ico" />
-  <!-- Quagga2 for live camera UPC scanning -->
+  <!-- Quagga2 for live camera barcode scan -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <h1>📦 Bid Barn Scanner</h1>
-    <div class="stats">
-      <div>Scanned: <span id="count">0</span></div>
-      <div>Avg Cost: $<span id="avg">0.00</span></div>
+  <header class="top">
+    <h1>📦 Bid Barn – Pallet Scanner</h1>
+    <div class="statbar">
+      <div>Pallet: <strong id="palletId">—</strong></div>
+      <div>Items on Pallet: <strong id="count">0</strong></div>
+      <div>Cost/Item (private): $<strong id="cpi">0.00</strong></div>
+      <div>Retail (last): $<strong id="retailLast">0.00</strong></div>
+      <div>Buy-Now 80% (last): $<strong id="binLast">0.00</strong></div>
     </div>
   </header>
 
-  <main class="container">
-    <!-- Pallet cost + target items -->
-    <section class="panel">
-      <h2>Session Setup</h2>
-      <div class="row">
-        <label>Total Pallet Cost ($)</label>
-        <input id="palletCost" type="number" inputmode="decimal" placeholder="e.g., 650.00" />
+  <main class="wrap">
+    <!-- Session: truck & pallet -->
+    <section class="card">
+      <h2>Session</h2>
+      <div class="grid2">
+        <div class="row"><label>Truck Cost ($)</label><input id="truckCost" type="number" inputmode="decimal" placeholder="e.g., 12500.00" /></div>
+        <div class="row"><label>Pallet Cost ($)</label><input id="palletCost" type="number" inputmode="decimal" placeholder="e.g., 650.00" /></div>
+        <div class="row"><label>Pallet ID / Label</label><input id="palletLabel" type="text" placeholder="e.g., A-03" /></div>
+        <div class="row"><label>Target Items on Pallet</label><input id="targetItems" type="number" inputmode="numeric" placeholder="e.g., 1200" /></div>
       </div>
-      <div class="row">
-        <label>Target Item Count</label>
-        <input id="targetCount" type="number" inputmode="numeric" placeholder="e.g., 1200" />
+      <div class="actions">
+        <button id="saveSession" class="btn">Save</button>
+        <button id="newPallet" class="btn">Start New Pallet</button>
       </div>
-      <button id="saveSession" class="btn">Save Session Settings</button>
+      <div class="small">Cost/Item = <em>Pallet Cost</em> ÷ <em>Items on this pallet</em> (or Target if set). <u>Not exported.</u></div>
     </section>
 
-    <!-- Scanner controls -->
-    <section class="panel">
-      <h2>Scan or Enter UPC</h2>
-      <div class="scan-controls">
+    <!-- Scan + capture -->
+    <section class="card">
+      <h2>Scan & Capture</h2>
+      <div class="actions">
         <button id="startCam" class="btn primary">🎥 Start Camera</button>
         <button id="stopCam" class="btn">⏹ Stop</button>
+        <button id="snapBtn" class="btn">📸 Capture Photo</button>
       </div>
-
-      <div class="video-wrap">
-        <div id="live" class="live"></div>
-      </div>
+      <div id="live" class="live"></div>
+      <canvas id="snapCanvas" width="640" height="480" style="display:none"></canvas>
 
       <div class="row">
         <input id="upcInput" type="text" inputmode="numeric" placeholder="Manual UPC" />
-        <button id="manualBtn" class="btn">Add</button>
+        <button id="addManual" class="btn">Add</button>
       </div>
     </section>
 
-    <!-- Last result -->
-    <section class="panel">
+    <!-- Last item summary -->
+    <section class="card">
       <h2>Last Item</h2>
-      <div id="lastItem" class="card empty">No item yet.</div>
+      <div id="lastItem" class="small">—</div>
     </section>
 
-    <!-- Items table + export -->
-    <section class="panel">
-      <h2>Scanned Items</h2>
+    <!-- Items + export -->
+    <section class="card">
+      <h2>Items on This Pallet</h2>
       <div class="actions">
-        <button id="exportCsv" class="btn">⬇️ Export CSV</button>
-        <button id="clearList" class="btn danger">🗑 Clear</button>
+        <button id="exportCsv" class="btn">⬇️ Export CSV (WooCommerce)</button>
+        <button id="clearPallet" class="btn danger">🗑 Clear Pallet Items</button>
       </div>
       <div class="table-wrap">
-        <table id="itemsTable">
+        <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>UPC</th>
-              <th>Title</th>
-              <th>Brand</th>
-              <th>Category</th>
-              <th>Avg Cost</th>
+              <th>#</th><th>UPC</th><th>Name</th><th>Brand</th><th>Retail</th><th>Start (CPI)</th><th>BIN (80%)</th><th>Img</th>
             </tr>
           </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <small>© 2025 Bid Barn</small>
-  </footer>
-
-  <script src="./app.js" defer></script>
-</body>
-</html>
+         
