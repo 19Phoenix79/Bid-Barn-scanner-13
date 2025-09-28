@@ -5,41 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Sir Scansalot</title>
   <link rel="stylesheet" href="./styles.css" />
-  <!-- Quagga2 for live camera barcode scan -->
+  <!-- Quagga2 for live camera barcode scanning -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
-  <style>
-    :root{--bg:#0e1117;--fg:#e6edf3;--muted:#9aa4b2;--card:#161b22;--border:#2d333b;--accent:#2f81f7;--danger:#e5534b}
-    *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-    .top{padding:10px 14px;border-bottom:1px solid var(--border);background:#0b0f14}
-    .brand{display:flex;align-items:center;gap:10px}
-    .brand h1{margin:0;font-size:20px}
-    .statbar{display:flex;gap:12px;margin-top:6px;color:var(--muted);font-size:14px;flex-wrap:wrap}
-    .wrap{padding:12px;display:grid;gap:12px}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    @media(max-width:780px){.grid2{grid-template-columns:1fr}}
-    .row{display:flex;gap:8px;align-items:center;margin:8px 0}
-    label{min-width:170px;color:var(--muted);font-size:14px}
-    input{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0b0f14;color:var(--fg);font-size:16px}
-    .btn{padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:#141a22;color:var(--fg);font-weight:600}
-    .btn.primary{background:#1b2430;border-color:#243041}
-    .btn.danger{background:#331919;border-color:#4a2a2a}
-    .live{width:100%;min-height:240px;background:#0b0f14;border:1px dashed var(--border);border-radius:10px;position:relative;overflow:hidden}
-    .small{font-size:12px;color:var(--muted)}
-    .table-wrap{overflow:auto;max-height:45vh;border:1px solid var(--border);border-radius:10px}
-    table{width:100%;border-collapse:collapse;font-size:14px}
-    thead{position:sticky;top:0;background:#0f141a}
-    th,td{padding:10px;border-bottom:1px solid var(--border);white-space:nowrap;text-align:left}
-    .thumb{width:56px;height:56px;object-fit:cover;border:1px solid var(--border);border-radius:6px}
-    .crest{display:block;margin:8px auto 0;max-width:200px;opacity:.9}
-  </style>
 </head>
 <body>
   <header class="top">
     <div class="brand">
       <h1>👑 Sir Scansalot</h1>
     </div>
-    <img src="./sir-scansalot.png" alt="Sir Scansalot crest" class="crest" />
+    <!-- Optional crest image: put a file named sir-scansalot.png in repo root if you have one -->
+    <img src="./sir-scansalot.png" alt="" class="crest" onerror="this.style.display='none'">
     <div class="statbar">
       <div>Pallet: <strong id="palletId">—</strong></div>
       <div>Items: <strong id="count">0</strong></div>
@@ -61,23 +36,24 @@
         <div class="row"><label>Target Items on Pallet</label><input id="targetItems" type="number" inputmode="numeric" placeholder="e.g., 1200" /></div>
         <div class="row"><label>Start % of Retail</label><input id="startPct" type="number" inputmode="decimal" placeholder="e.g., 23 for 23%" /></div>
       </div>
-      <div class="row" style="gap:8px">
+      <div class="row gap">
         <button id="saveSession" class="btn">Save</button>
         <button id="newPallet" class="btn">Start New Pallet</button>
       </div>
-      <div class="small">Start price per item = <b>Retail × Start% of Retail</b>. Cost/Item is shown only to you and <u>not exported</u>.</div>
+      <div class="small">Start price per item = <b>Retail × Start% of Retail</b>. Cost/Item (CPI) is for you only and is <u>not exported</u>.</div>
     </section>
 
     <!-- Scan + capture -->
     <section class="card">
       <h2>Scan & Capture</h2>
-      <div class="row" style="gap:8px">
+      <div class="row gap">
         <button id="startCam" class="btn primary">🎥 Start Camera</button>
         <button id="stopCam" class="btn">⏹ Stop</button>
         <button id="snapBtn" class="btn">📸 Capture Photo</button>
       </div>
       <div id="live" class="live"></div>
       <canvas id="snapCanvas" width="640" height="480" style="display:none"></canvas>
+
       <div class="row">
         <input id="upcInput" type="text" inputmode="numeric" placeholder="Manual UPC" />
         <button id="addManual" class="btn">Add</button>
@@ -93,7 +69,7 @@
     <!-- Items + export -->
     <section class="card">
       <h2>Items on This Pallet</h2>
-      <div class="row" style="gap:8px">
+      <div class="row gap">
         <button id="exportCsv" class="btn">⬇️ Export CSV (WooCommerce)</button>
         <button id="clearPallet" class="btn danger">🗑 Clear Pallet Items</button>
       </div>
@@ -101,7 +77,7 @@
         <table>
           <thead>
             <tr>
-              <th>#</th><th>UPC</th><th>Name</th><th>Brand</th><th>Retail</th><th>Start (Pct)</th><th>BIN (80%)</th><th>Img</th>
+              <th>#</th><th>UPC</th><th>Name</th><th>Brand</th><th>Retail</th><th>Start (% of Retail)</th><th>BIN (80%)</th><th>Photo</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -112,7 +88,9 @@
 
   <footer class="top"><div class="small">© 2025 Bid Barn</div></footer>
 
-  <!-- Scanner + app -->
+  <!-- Optional: quick cheer sound when a scan succeeds (add cheer.mp3 to repo root if you want) -->
+  <!-- <audio id="cheer" src="./cheer.mp3" preload="auto"></audio> -->
+
   <script src="./app.js" defer></script>
 </body>
 </html>
