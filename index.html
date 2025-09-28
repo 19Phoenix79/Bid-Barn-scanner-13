@@ -1,2 +1,42 @@
-<link rel="stylesheet" href="./styles.css">
-<script src="./app.js" defer></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bid Barn Scanner</title>
+
+  <!-- Link to your stylesheet -->
+  <link rel="stylesheet" href="./styles.css" />
+
+  <!-- Favicon (optional, add favicon.ico/png files to your repo) -->
+  <link rel="icon" href="./favicon.ico" type="image/x-icon" />
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+</head>
+<body>
+  <header>
+    <h1>📦 Bid Barn UPC Scanner</h1>
+  </header>
+
+  <main>
+    <!-- UPC Input -->
+    <section class="scanner-section">
+      <label for="upcInput">Enter or Scan UPC:</label>
+      <input type="text" id="upcInput" placeholder="Enter UPC code" />
+      <button id="scanBtn">Search</button>
+    </section>
+
+    <!-- Results Area -->
+    <section id="results">
+      <h2>Results</h2>
+      <div id="resultBox">UPC lookup results will appear here.</div>
+    </section>
+  </main>
+
+  <footer>
+    <p>© 2025 Bid Barn</p>
+  </footer>
+
+  <!-- Your script -->
+  <script src="./app.js" defer></script>
+</body>
+</html>
