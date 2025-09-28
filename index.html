@@ -2,41 +2,90 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bid Barn Scanner</title>
-
-  <!-- Link to your stylesheet -->
   <link rel="stylesheet" href="./styles.css" />
-
-  <!-- Favicon (optional, add favicon.ico/png files to your repo) -->
-  <link rel="icon" href="./favicon.ico" type="image/x-icon" />
-  <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+  <link rel="icon" href="./favicon.ico" />
+  <!-- Quagga2 for live camera UPC scanning -->
+  <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 </head>
 <body>
-  <header>
-    <h1>📦 Bid Barn UPC Scanner</h1>
+  <header class="topbar">
+    <h1>📦 Bid Barn Scanner</h1>
+    <div class="stats">
+      <div>Scanned: <span id="count">0</span></div>
+      <div>Avg Cost: $<span id="avg">0.00</span></div>
+    </div>
   </header>
 
-  <main>
-    <!-- UPC Input -->
-    <section class="scanner-section">
-      <label for="upcInput">Enter or Scan UPC:</label>
-      <input type="text" id="upcInput" placeholder="Enter UPC code" />
-      <button id="scanBtn">Search</button>
+  <main class="container">
+    <!-- Pallet cost + target items -->
+    <section class="panel">
+      <h2>Session Setup</h2>
+      <div class="row">
+        <label>Total Pallet Cost ($)</label>
+        <input id="palletCost" type="number" inputmode="decimal" placeholder="e.g., 650.00" />
+      </div>
+      <div class="row">
+        <label>Target Item Count</label>
+        <input id="targetCount" type="number" inputmode="numeric" placeholder="e.g., 1200" />
+      </div>
+      <button id="saveSession" class="btn">Save Session Settings</button>
     </section>
 
-    <!-- Results Area -->
-    <section id="results">
-      <h2>Results</h2>
-      <div id="resultBox">UPC lookup results will appear here.</div>
+    <!-- Scanner controls -->
+    <section class="panel">
+      <h2>Scan or Enter UPC</h2>
+      <div class="scan-controls">
+        <button id="startCam" class="btn primary">🎥 Start Camera</button>
+        <button id="stopCam" class="btn">⏹ Stop</button>
+      </div>
+
+      <div class="video-wrap">
+        <div id="live" class="live"></div>
+      </div>
+
+      <div class="row">
+        <input id="upcInput" type="text" inputmode="numeric" placeholder="Manual UPC" />
+        <button id="manualBtn" class="btn">Add</button>
+      </div>
+    </section>
+
+    <!-- Last result -->
+    <section class="panel">
+      <h2>Last Item</h2>
+      <div id="lastItem" class="card empty">No item yet.</div>
+    </section>
+
+    <!-- Items table + export -->
+    <section class="panel">
+      <h2>Scanned Items</h2>
+      <div class="actions">
+        <button id="exportCsv" class="btn">⬇️ Export CSV</button>
+        <button id="clearList" class="btn danger">🗑 Clear</button>
+      </div>
+      <div class="table-wrap">
+        <table id="itemsTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>UPC</th>
+              <th>Title</th>
+              <th>Brand</th>
+              <th>Category</th>
+              <th>Avg Cost</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
-  <footer>
-    <p>© 2025 Bid Barn</p>
+  <footer class="footer">
+    <small>© 2025 Bid Barn</small>
   </footer>
 
-  <!-- Your script -->
   <script src="./app.js" defer></script>
 </body>
 </html>
