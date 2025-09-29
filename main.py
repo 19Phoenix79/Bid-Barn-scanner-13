@@ -35,40 +35,56 @@ def api_lookup():
     if not upc:
         return jsonify({"ok": False, "error": "missing_upc"}), 400
 
-    try:
+    def try_lookup(u):
         r = requests.get(
             "https://api.upcitemdb.com/prod/trial/lookup",
-            params={"upc": upc},
+            params={"upc": u},
             timeout=10
         )
         r.raise_for_status()
-        data = r.json()
-        items = data.get("items") or []
-        if items:
+        return r.json()
+
+    # Try as-given; if 13 digits starting with 0, also try 12-digit UPC-A
+    candidates = [upc]
+    if len(upc) == 13 and upc.startswith("0"):
+        candidates.append(upc[1:])
+
+    for candidate in candidates:
+        try:
+            data = try_lookup(candidate)
+            items = (data or {}).get("items") or []
+            if not items:
+                continue
             it = items[0]
+
             title = it.get("title") or ""
             brand = it.get("brand") or ""
             asin = it.get("asin") or ""
-            # Try to derive a retail/list price from offers if present
+
+            # Retail from offers
             retail = 0.0
             for o in it.get("offers") or []:
                 price = o.get("list_price") or o.get("price")
                 retail = max(retail, _safe_float(price))
-            # Description fields (UPCItemDB sometimes returns 'description' or 'long_description')
+
+            # Fallbacks if offers empty
+            if retail <= 0:
+                retail = max(
+                    _safe_float(it.get("highest_recorded_price")),
+                    _safe_float(it.get("lowest_recorded_price")),
+                    _safe_float(it.get("msrp")),
+                )
+
             desc = _first(
                 it.get("description"),
                 it.get("long_description"),
                 it.get("subtitle"),
             )
-            # If nothing, try to synthesize a minimal description server-side
             if not desc:
-                # very short, safe fallback (UI also has a client generator)
                 bits = []
                 if brand: bits.append(brand)
-                if title and (title.lower() != brand.lower()):
-                    bits.append(title)
-                if retail:
-                    bits.append(f"Approx. retail: ${retail:0.2f}.")
+                if title and (title.lower() != brand.lower()): bits.append(title)
+                if retail: bits.append(f"Approx. retail: ${retail:0.2f}.")
                 bits.append("Condition not verified. See photos for details.")
                 desc = " ".join(bits).strip()
 
@@ -77,7 +93,8 @@ def api_lookup():
             return jsonify({
                 "ok": True,
                 "provider": "upcitemdb",
-                "upc": upc,
+                "queried": candidate,
+                "upc": candidate,
                 "asin": asin,
                 "title": title,
                 "brand": brand,
@@ -85,10 +102,10 @@ def api_lookup():
                 "description": desc,
                 "amazon_url": amazon_url
             })
-    except Exception:
-        pass
+        except Exception:
+            continue
 
-    return jsonify({"ok": False, "error": "not_found"}), 200
+    return jsonify({"ok": False, "error": "not_found_or_rate_limited"}), 200
 
 if __name__ == "__main__":
     # On Render use Start Command: gunicorn main:app
