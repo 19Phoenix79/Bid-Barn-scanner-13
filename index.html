@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Sir Scansalot</title>
   <link rel="stylesheet" href="./styles.css" />
-  <!-- Quagga2 for live camera barcode scanning -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 </head>
 <body>
@@ -13,11 +12,10 @@
     <div class="brand">
       <h1>👑 Sir Scansalot</h1>
     </div>
-    <!-- Optional crest preview (can remove if using full-page background) -->
     <img src="./background.png" alt="" class="crest" onerror="this.style.display='none'">
     <div class="statbar">
       <div>Pallet: <strong id="palletId">—</strong></div>
-      <div>Items: <strong id="count">0</strong></div>
+      <div>Items (units): <strong id="count">0</strong></div>
       <div>Cost/Item (private): $<strong id="cpi">0.00</strong></div>
       <div>Start % of Retail: <strong id="startPctView">0%</strong></div>
       <div>Retail (last): $<strong id="retailLast">0.00</strong></div>
@@ -26,7 +24,6 @@
   </header>
 
   <main class="wrap">
-    <!-- Session -->
     <section class="card">
       <h2>Session</h2>
       <div class="grid2">
@@ -48,12 +45,11 @@
         <button id="newPallet" class="btn">Start New Pallet</button>
       </div>
       <div class="small">
-        Start (your cost) = <b>$1</b> if “$1 Flat”, otherwise <b>Retail × Start%</b>.<br>
-        BIN = <b>Retail × 0.80</b>. Profit assumes sale at <b>38%</b> + <b>12% buyer fee</b>.
+        Start (your cost) = <b>$1</b> if “$1 Flat”, otherwise <b>Retail × Start%</b>. BIN = <b>Retail × 0.80</b>.<br>
+        Profit assumes sale at <b>38%</b> + <b>12% buyer fee</b>. Quantity supported per row.
       </div>
     </section>
 
-    <!-- Scan + capture -->
     <section class="card">
       <h2>Scan & Capture</h2>
       <div class="row gap">
@@ -63,20 +59,17 @@
       </div>
       <div id="live" class="live"></div>
       <canvas id="snapCanvas" width="640" height="480" style="display:none"></canvas>
-
       <div class="row">
         <input id="upcInput" type="text" inputmode="numeric" placeholder="Manual UPC" />
         <button id="addManual" class="btn">Add</button>
       </div>
     </section>
 
-    <!-- Last item -->
     <section class="card">
       <h2>Last Item</h2>
       <div id="lastItem" class="small">—</div>
     </section>
 
-    <!-- Items + export -->
     <section class="card">
       <h2>Items on This Pallet</h2>
       <div class="row gap">
@@ -90,7 +83,7 @@
               <th>#</th><th>UPC</th><th>Name</th><th>Brand</th>
               <th>Retail</th><th>Start</th><th>BIN (80%)</th>
               <th>Goal Sale (38%)</th><th>Buyer Fee (12%)</th><th>Profit</th>
-              <th>Photo</th>
+              <th>Qty</th><th>Photo</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -99,11 +92,10 @@
     </section>
   </main>
 
-  <footer class="top"><div class="small">© 2025 Bid Barn</div></footer>
+  <!-- Toast (item captured popup) -->
+  <div id="toast" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Optional cheer (add cheer.mp3 to root and uncomment both lines)
-  <audio id="cheer" src="./cheer.mp3" preload="auto"></audio>
-  -->
+  <footer class="top"><div class="small">© 2025 Bid Barn</div></footer>
 
   <script src="./app.js" defer></script>
 </body>
