@@ -23,6 +23,12 @@ def _safe_float(v):
     except Exception:
         return 0.0
 
+def _first(*vals):
+    for v in vals:
+        if v:
+            return v
+    return ""
+
 @app.route("/api/lookup")
 def api_lookup():
     upc = (request.args.get("upc") or "").strip()
@@ -48,6 +54,23 @@ def api_lookup():
             for o in it.get("offers") or []:
                 price = o.get("list_price") or o.get("price")
                 retail = max(retail, _safe_float(price))
+            # Description fields (UPCItemDB sometimes returns 'description' or 'long_description')
+            desc = _first(
+                it.get("description"),
+                it.get("long_description"),
+                it.get("subtitle"),
+            )
+            # If nothing, try to synthesize a minimal description server-side
+            if not desc:
+                # very short, safe fallback (UI also has a client generator)
+                bits = []
+                if brand: bits.append(brand)
+                if title and (title.lower() != brand.lower()):
+                    bits.append(title)
+                if retail:
+                    bits.append(f"Approx. retail: ${retail:0.2f}.")
+                bits.append("Condition not verified. See photos for details.")
+                desc = " ".join(bits).strip()
 
             amazon_url = f"https://www.amazon.com/dp/{asin}" if asin else ""
 
@@ -59,6 +82,7 @@ def api_lookup():
                 "title": title,
                 "brand": brand,
                 "retail": retail,
+                "description": desc,
                 "amazon_url": amazon_url
             })
     except Exception:
