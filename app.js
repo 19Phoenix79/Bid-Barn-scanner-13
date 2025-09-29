@@ -1,4 +1,4 @@
-// ===== Sir Scansalot — Auto Start% = CostPerItem/Retail, Qty per item, Description to CSV, Toast + De-dupe =====
+// ===== Sir Scansalot — Render-ready: Camera + Quagga, Auto Start% = CPI/Retail, Qty, Desc to CSV, Toast + De-dupe =====
 (() => {
   const $ = (id) => document.getElementById(id);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -9,8 +9,8 @@
     palletCost: $("palletCost"),
     palletLabel: $("palletLabel"),
     targetItems: $("targetItems"),
-    startPct: $("startPct"),     // if >0, manual override; else auto from CPI/Retail
-    startMode: $("startMode"),   // 'pct' or 'dollar' (kept for flexibility)
+    startPct: $("startPct"),     // manual override if >0, else AUTO
+    startMode: $("startMode"),   // keep 'pct' vs '$1' option
     startPctView: $("startPctView"),
     palletId: $("palletId"),
     count: $("count"),
@@ -57,14 +57,14 @@
     recently.set(upc, Date.now() + DEDUPE_MS);
   }
 
-  const SKEY = "bb_pallet_v7";
+  const SKEY = "bb_pallet_render_v1";
   const state = {
     truckCost: 0,
     palletCost: 0,
     palletLabel: "",
-    targetItems: 0,     // if >0, use this for CPI; else use current total units
-    startPct: 0,        // manual override if >0 (0 or blank -> auto)
-    startMode: "pct",   // kept for compatibility; if 'dollar', start price = $1
+    targetItems: 0,
+    startPct: 0,        // 0 => AUTO
+    startMode: "pct",
     items: []           // { upc, asin, title, brand, retail, desc, startPrice, startPctComputed, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
   };
 
@@ -72,8 +72,6 @@
   function save(){ localStorage.setItem(SKEY, JSON.stringify(state)); }
 
   const totalUnits = () => state.items.reduce((s, it) => s + (Number(it.qty)||0), 0);
-
-  // CPI display uses targetItems if set; else current total units (or 1 to avoid div by 0).
   function currentCPI() {
     const denom = (state.targetItems && state.targetItems > 0) ? state.targetItems : Math.max(1, totalUnits());
     return state.palletCost ? (state.palletCost / denom) : 0;
@@ -84,9 +82,6 @@
     if (el.count) el.count.textContent = totalUnits();
     if (el.cpi) el.cpi.textContent = money(currentCPI());
 
-    // Show Start % in header:
-    // - If manual override set (>0), show that.
-    // - Else if we have a last item with retail, show that item's computed %.
     let pctHeader = state.startPct > 0 ? (state.startPct * 100) : 0;
     if (!(pctHeader > 0) && state.items[0] && state.items[0].startPctComputed > 0) {
       pctHeader = state.items[0].startPctComputed * 100;
@@ -103,7 +98,6 @@
         if ((it.profit||0) > 0) tr.classList.add("profit-positive");
         if ((it.profit||0) < 0) tr.classList.add("profit-negative");
         const img = it.userImg || "";
-
         const retailHtml = (it.retail && it.retail > 0)
           ? `$${money(it.retail)}`
           : `$0.00 <button class="qbtn" data-i="${i}" data-act="set-retail">Set</button>`;
@@ -152,13 +146,12 @@
             Goal Sale (38%) $${money(it.goalSale||0)} • Buyer Fee (12%) $${money(it.buyerFee||0)}
             • <b>Profit</b> $${money(it.profit||0)}
           </div>
-          ${shortDesc ? `<div class="small" style="margin-top:6px;max-width:600px;">Desc: ${shortDesc}${it.desc.length>180?'…':''}</div>` : ""}
+          ${shortDesc ? `<div class="small" style="margin-top:6px;max-width:600px;">Desc: ${shortDesc}${(it.desc||"").length>180?'…':''}</div>` : ""}
         </div>
       </div>
     `;
   }
 
-  // Generate fallback description if none from API
   function genDesc(it){
     const parts = [];
     if (it.brand) parts.push(it.brand);
@@ -168,15 +161,13 @@
     return parts.join(" ");
   }
 
-  // --- Core calculation for a new item ---
+  // Compute prices for a NEW item
   function computePricesForNewItem(retail) {
-    // denominator for CPI when adding a NEW item:
     const denom = (state.targetItems && state.targetItems > 0)
       ? state.targetItems
-      : Math.max(1, totalUnits() + 1); // include the new unit being added
+      : Math.max(1, totalUnits() + 1); // include new unit
     const cpiNew = state.palletCost ? (state.palletCost / denom) : 0;
 
-    // Manual override? If state.startPct>0, use it; else auto from CPI/Retail
     let startPrice = 0, startPctComputed = 0;
     if (state.startMode === "dollar") {
       startPrice = 1;
@@ -185,8 +176,7 @@
       startPctComputed = state.startPct;
       startPrice = retail > 0 ? (retail * state.startPct) : 0;
     } else {
-      // AUTO: Start price is your cost per item; Start% = CPI/Retail
-      startPrice = cpiNew;
+      startPrice = cpiNew; // AUTO = your cost per item
       startPctComputed = retail > 0 ? (cpiNew / retail) : 0;
     }
 
@@ -234,14 +224,13 @@
 
     if (!desc) desc = genDesc({ brand, title, retail });
 
-    // Compute prices using AUTO logic (or manual override if set)
     const calc = computePricesForNewItem(retail);
 
     const item = {
       upc, asin, title, brand, retail,
       desc,
       startPrice: calc.startPrice,
-      startPctComputed: calc.startPctComputed, // stored per-item for display
+      startPctComputed: calc.startPctComputed,
       binPrice: calc.binPrice,
       goalSale: calc.goalSale,
       buyerFee: calc.buyerFee,
@@ -259,7 +248,7 @@
     setTimeout(()=>{ scanBusy = false; }, 900);
   }
 
-  // Camera
+  // Camera + Quagga
   let running=false, handlerRef=null;
   function attachHandler(){
     if (!window.Quagga) return;
@@ -275,16 +264,30 @@
     window.Quagga.onDetected(handlerRef);
   }
   function startCamera(){
+    // Must be on HTTPS (or localhost)
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      alert("Camera requires HTTPS. Open this site on https://");
+      return;
+    }
     if (running) return;
     if (!window.Quagga){ alert("Scanner library not loaded. Check internet."); return; }
+
     const cfg = {
-      inputStream:{ type:"LiveStream", target: el.live, constraints:{ facingMode:"environment" }},
+      inputStream:{
+        type:"LiveStream",
+        target: el.live,
+        constraints:{ facingMode:"environment" }
+      },
       decoder:{ readers:["ean_reader","upc_reader","upc_e_reader","code_128_reader","ean_8_reader"] },
-      locate:true, numOfWorkers: navigator.hardwareConcurrency || 2
+      locate:true,
+      numOfWorkers: navigator.hardwareConcurrency || 2
     };
     window.Quagga.init(cfg,(err)=>{
       if (err){ console.error(err); alert("Camera init failed. Allow camera & HTTPS."); return; }
       attachHandler(); window.Quagga.start(); running=true;
+      // add a visible <video> so users see preview even if Quagga hides it
+      const v = el.live.querySelector("video");
+      if (v) { v.setAttribute("playsinline", "true"); v.style.width = "100%"; }
     });
   }
   function stopCamera(){
@@ -293,7 +296,7 @@
     window.Quagga.stop(); running=false; handlerRef=null;
   }
 
-  // Snapshot attaches ONLY your photo to the latest item
+  // Snapshot -> attach to latest item
   function snapPhoto(){
     const video = el.live && el.live.querySelector("video");
     if (!video){ alert("Start camera first."); return; }
@@ -307,23 +310,19 @@
     else { alert("Scan an item first, then snap."); }
   }
 
-  // Qty handlers (event delegation)
+  // Qty + Set Retail handlers (delegated)
   on(el.tbody, "click", (e) => {
     const btn = e.target.closest(".qbtn");
     if (!btn) return;
-
     const idx = Number(btn.dataset.i);
-    const act = btn.dataset.act || "";
-    const delta = Number(btn.dataset.delta || 0);
-    const it = state.items[idx];
-    if (!it) return;
+    const it = state.items[idx]; if (!it) return;
 
+    const act = btn.dataset.act || "";
     if (act === "set-retail") {
       const val = prompt("Enter retail price for this item:", it.retail || "");
       const r = Number(val);
       if (isFinite(r) && r >= 0) {
         it.retail = r;
-        // Recompute using same logic (manual % wins if set)
         const recalc = computePricesForNewItem(it.retail);
         it.startPrice = recalc.startPrice;
         it.startPctComputed = recalc.startPctComputed;
@@ -336,9 +335,9 @@
       return;
     }
 
+    const delta = Number(btn.dataset.delta || 0);
     if (delta !== 0) {
-      const next = Math.max(1, (Number(it.qty)||1) + delta);
-      it.qty = next;
+      it.qty = Math.max(1, (Number(it.qty)||1) + delta);
       save(); repaint();
     }
   });
@@ -354,7 +353,7 @@
     save(); repaint();
   });
 
-  // Export: WooCommerce CSV — includes Description; Stock = qty
+  // Export Woo CSV
   function exportWooCsv(){
     const headers = [
       "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
@@ -363,7 +362,7 @@
     const rows = [headers];
 
     state.items.forEach((it,i)=>{
-      const images = ""; // leave blank for Woo CSV
+      const images = ""; // leave blank
       const description = it.desc || "";
       rows.push([
         it.title || `Item ${i+1}`,                // Name
@@ -374,7 +373,7 @@
         "", "",                                    // Tags, Short description
         description,                               // Long description
         images,                                    // Images
-        String(Math.max(1, Number(it.qty)||1)),   // Stock = qty
+        String(Math.max(1, Number(it.qty)||1)),   // Stock
         "1","visible","publish"
       ]);
     });
