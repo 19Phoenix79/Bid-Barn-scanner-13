@@ -1,4 +1,4 @@
-// ===== Sir Scansalot — Qty per item, Start Mode switch, Profit calc, Free-only lookup, No internet images =====
+// ===== Sir Scansalot — Qty per item, Start Mode switch, Profit calc, Free-only lookup, Description to CSV =====
 (() => {
   const $ = (id) => document.getElementById(id);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -35,8 +35,7 @@
 
   // --- Toast helper ---
   function toast(msg) {
-    const host = el.toastHost;
-    if (!host) return;
+    const host = el.toastHost || document.body;
     const div = document.createElement("div");
     div.className = "toast-bubble";
     div.textContent = msg;
@@ -58,7 +57,7 @@
     recently.set(upc, Date.now() + DEDUPE_MS);
   }
 
-  const SKEY = "bb_pallet_v5";
+  const SKEY = "bb_pallet_v6";
   const state = {
     truckCost: 0,
     palletCost: 0,
@@ -66,7 +65,7 @@
     targetItems: 0,
     startPct: 0,        // 0.23 => 23%
     startMode: "pct",   // 'pct' or 'dollar'
-    items: []           // { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
+    items: []           // { upc, asin, title, brand, retail, desc, startPrice, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
   };
 
   function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(SKEY) || "{}")); }catch{} }
@@ -119,6 +118,7 @@
     if (!el.lastItem) return;
     const asinLine = it.asin ? ` • ASIN: ${it.asin}` : "";
     const img = it.userImg || "";
+    const shortDesc = (it.desc || "").slice(0, 180);
     el.lastItem.innerHTML = `
       <div style="display:flex;gap:10px;align-items:center">
         ${img ? `<img class="thumb" src="${img}" />` : ""}
@@ -133,13 +133,23 @@
             Goal Sale (38%) $${money(it.goalSale||0)} • Buyer Fee (12%) $${money(it.buyerFee||0)}
             • <b>Profit</b> $${money(it.profit||0)}
           </div>
+          ${shortDesc ? `<div class="small" style="margin-top:6px;max-width:600px;">Desc: ${shortDesc}${it.desc.length>180?'…':''}</div>` : ""}
         </div>
       </div>
     `;
   }
 
-  // Add or update (merge same UPC into same row by increasing qty?)
-  // We will NOT auto-merge different scans; you can scan once then adjust qty.
+  // Generate a friendly fallback description on the client if server had none
+  function genDesc(it){
+    const parts = [];
+    if (it.brand) parts.push(it.brand);
+    if (it.title && it.title.toLowerCase() !== (it.brand||"").toLowerCase()) parts.push(it.title);
+    if (it.retail) parts.push(`Approx. retail: $${money(it.retail)}.`);
+    parts.push("Condition not verified. See photos for details.");
+    return parts.join(" ");
+  }
+
+  // Add item
   let scanBusy = false;
 
   async function addUPC(upc){
@@ -148,7 +158,7 @@
     if (isRecentlyScanned(upc)) { toast("Already captured"); return; }
     scanBusy = true;
 
-    let asin="", title="", brand="", retail=0, amazonUrl="";
+    let asin="", title="", brand="", retail=0, amazonUrl="", desc="";
     try{
       const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
       const j = await r.json();
@@ -158,9 +168,16 @@
         brand = j.brand || "";
         retail = Number(j.retail || 0);
         amazonUrl = j.amazon_url || "";
+        desc = j.description || "";
       }
     }catch{}
 
+    if (!desc) {
+      // create a helpful fallback so CSV always has something
+      desc = genDesc({ brand, title, retail });
+    }
+
+    // Start / BIN / Goal / Fee / Profit
     let startPrice = 0;
     if (state.startMode === "dollar") startPrice = 1;
     else startPrice = retail ? (retail * (state.startPct || 0)) : 0;
@@ -170,7 +187,12 @@
     const buyerFee = goalSale * 0.12;
     const profit   = (goalSale + buyerFee) - startPrice;
 
-    const item = { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, qty: 1, userImg: "", amazonUrl };
+    const item = {
+      upc, asin, title, brand, retail,
+      desc,
+      startPrice, binPrice, goalSale, buyerFee, profit,
+      qty: 1, userImg: "", amazonUrl
+    };
     state.items.unshift(item);
     save();
     setLast(item);
@@ -230,7 +252,7 @@
     else { alert("Scan an item first, then snap."); }
   }
 
-  // Qty handlers (event delegation on tbody)
+  // Qty handlers
   on(el.tbody, "click", (e) => {
     const btn = e.target.closest(".qbtn");
     if (!btn) return;
@@ -254,7 +276,7 @@
     save(); repaint();
   });
 
-  // Export: WooCommerce CSV (Stock = qty)
+  // Export: WooCommerce CSV — put description into the Description column
   function exportWooCsv(){
     const headers = [
       "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
@@ -264,6 +286,7 @@
 
     state.items.forEach((it,i)=>{
       const images = ""; // leave blank for Woo CSV
+      const description = it.desc || ""; // pulled or generated
       rows.push([
         it.title || `Item ${i+1}`,                // Name
         it.upc || "",                              // SKU
@@ -271,7 +294,7 @@
         "", "",                                    // Sale price, Categories
         it.brand || "",                            // Brands
         "", "",                                    // Tags, Short description
-        it.amazonUrl ? `Amazon: ${it.amazonUrl}` : "", // Description (optional)
+        description,                               // Description -> Woo long description
         images,                                    // Images
         String(Math.max(1, Number(it.qty)||1)),   // Stock = qty
         "1","visible","publish"
@@ -340,6 +363,7 @@
 
   document.addEventListener("DOMContentLoaded",()=>{
     load();
+    if (el.palletId) el.palletId.textContent = state.palletLabel || "—";
     if (el.truckCost)   el.truckCost.value   = state.truckCost || "";
     if (el.palletCost)  el.palletCost.value  = state.palletCost || "";
     if (el.palletLabel) el.palletLabel.value = state.palletLabel || "";
