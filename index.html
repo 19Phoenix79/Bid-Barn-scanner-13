@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Sir Scansalot</title>
   <link rel="stylesheet" href="./styles.css" />
+  <!-- Quagga2 for live camera barcode scanning -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 </head>
 <body>
@@ -31,12 +32,12 @@
         <div class="row"><label>Pallet Cost ($)</label><input id="palletCost" type="number" inputmode="decimal" placeholder="e.g., 650.00" /></div>
         <div class="row"><label>Pallet ID / Label</label><input id="palletLabel" type="text" placeholder="e.g., A-03" /></div>
         <div class="row"><label>Target Items on Pallet</label><input id="targetItems" type="number" inputmode="numeric" placeholder="e.g., 1200" /></div>
-        <div class="row"><label>Start % of Retail</label><input id="startPct" type="number" inputmode="decimal" placeholder="e.g., 23 for 23%" /></div>
+        <div class="row"><label>Start % of Retail</label><input id="startPct" type="number" inputmode="decimal" placeholder="leave blank for AUTO" /></div>
         <div class="row">
           <label>Start Mode</label>
           <select id="startMode">
-            <option value="pct" selected>% of Retail (current)</option>
-            <option value="dollar">$1 Flat (future)</option>
+            <option value="pct" selected>% of Retail (manual override)</option>
+            <option value="dollar">$1 Flat (optional)</option>
           </select>
         </div>
       </div>
@@ -45,8 +46,8 @@
         <button id="newPallet" class="btn">Start New Pallet</button>
       </div>
       <div class="small">
-        Start (your cost) = <b>$1</b> if “$1 Flat”, otherwise <b>Retail × Start%</b>. BIN = <b>Retail × 0.80</b>.<br>
-        Profit assumes sale at <b>38%</b> + <b>12% buyer fee</b>. Quantity supported per row.
+        If Start % is blank/0, the app uses <b>Cost-Per-Item ÷ Retail</b> automatically.<br>
+        BIN = <b>Retail × 0.80</b>. Profit assumes sale at <b>38%</b> + <b>12% buyer fee</b>.
       </div>
     </section>
 
