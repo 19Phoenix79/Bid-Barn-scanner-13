@@ -1,4 +1,4 @@
-// ===== Sir Scansalot — Start Price = % of Retail, Free-only lookup, No internet images =====
+// ===== Sir Scansalot — Start Mode switch ($1 or %), Profit calc, Free-only lookup, No internet images =====
 (() => {
   // ---- helpers
   const $ = (id) => document.getElementById(id);
@@ -12,6 +12,7 @@
     palletLabel: $("palletLabel"),
     targetItems: $("targetItems"),
     startPct: $("startPct"),
+    startMode: $("startMode"),
     startPctView: $("startPctView"),
     palletId: $("palletId"),
     count: $("count"),
@@ -31,18 +32,19 @@
     newPallet: $("newPallet"),
     exportCsv: $("exportCsv"),
     clearPallet: $("clearPallet"),
-    // cheer: $("cheer") // if you add cheer.mp3, uncomment & use this element
+    // cheer: $("cheer") // if you add cheer.mp3
   };
 
   // ---- state
-  const SKEY = "bb_pallet_v2";
+  const SKEY = "bb_pallet_v4";
   const state = {
     truckCost: 0,
     palletCost: 0,
     palletLabel: "",
     targetItems: 0,
-    startPct: 0, // 0.23 => 23%
-    items: [] // { upc, asin, title, brand, retail, startPrice, binPrice, userImg, amazonUrl }
+    startPct: 0,        // 0.23 => 23%
+    startMode: "pct",   // 'pct' or 'dollar'
+    items: []           // { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, userImg, amazonUrl }
   };
 
   function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(SKEY) || "{}")); }catch{} }
@@ -62,7 +64,9 @@
       el.tbody.innerHTML = "";
       state.items.forEach((it,i)=>{
         const tr = document.createElement("tr");
-        const img = it.userImg || ""; // ONLY your snapshot
+        if ((it.profit||0) > 0) tr.classList.add("profit-positive");
+        if ((it.profit||0) < 0) tr.classList.add("profit-negative");
+        const img = it.userImg || "";
         tr.innerHTML = `
           <td>${i + 1}</td>
           <td>${it.upc || ""}</td>
@@ -71,6 +75,9 @@
           <td>$${money(it.retail || 0)}</td>
           <td>$${money(it.startPrice || 0)}</td>
           <td>$${money(it.binPrice || 0)}</td>
+          <td>$${money(it.goalSale || 0)}</td>
+          <td>$${money(it.buyerFee || 0)}</td>
+          <td>$${money(it.profit || 0)}</td>
           <td>${img ? `<img class="thumb" src="${img}" />` : ""}</td>
         `;
         el.tbody.appendChild(tr);
@@ -88,13 +95,20 @@
         <div>
           <strong>${it.title || "Item"}</strong>
           <div class="small">UPC: ${it.upc || ""}${asinLine} • Brand: ${it.brand || ""}</div>
-          <div class="small">Retail $${money(it.retail||0)} • Start (${Math.round((state.startPct||0)*100)}%) $${money(it.startPrice||0)} • BIN 80% $${money(it.binPrice||0)}</div>
+          <div class="small">
+            Retail $${money(it.retail||0)} • Start (${state.startMode === "dollar" ? "$1 flat" : (Math.round((state.startPct||0)*100)+'%')}) $${money(it.startPrice||0)}
+            • BIN 80% $${money(it.binPrice||0)}
+          </div>
+          <div class="small">
+            Goal Sale (38%) $${money(it.goalSale||0)} • Buyer Fee (12%) $${money(it.buyerFee||0)}
+            • <b>Profit</b> $${money(it.profit||0)}
+          </div>
         </div>
       </div>
     `;
   }
 
-  // ---- Add item (free-only lookup, no prompts, lock to avoid loops)
+  // ---- Add item (free-only lookup, lock to avoid loops)
   let scanBusy = false;
 
   async function addUPC(upc){
@@ -102,9 +116,7 @@
     if (!upc || scanBusy) return;
     scanBusy = true;
 
-    const pct = state.startPct || 0;
-
-    // Call backend free lookup (UPCItemDB trial)
+    // Free lookup (UPCItemDB trial via backend)
     let asin="", title="", brand="", retail=0, amazonUrl="";
     try{
       const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
@@ -118,16 +130,29 @@
       }
     }catch{}
 
-    const startPrice = retail ? (retail * pct) : 0; // % of retail
-    const binPrice   = retail ? (retail * 0.80) : 0; // 80% of retail
+    // Start / BIN / Goal / Fee / Profit
+    let startPrice = 0;
+    if (state.startMode === "dollar") {
+      startPrice = 1; // $1 flat start
+    } else {
+      startPrice = retail ? (retail * (state.startPct || 0)) : 0; // % of retail
+    }
+    const binPrice = retail ? (retail * 0.80) : 0;   // 80% of retail
+    const goalSale = retail ? (retail * 0.38) : 0;  // 38% of retail
+    const buyerFee = goalSale * 0.12;               // 12% buyer fee
+    const profit   = (goalSale + buyerFee) - startPrice;
 
-    const item = { upc, asin, title, brand, retail, startPrice, binPrice, userImg: "", amazonUrl };
+    const item = {
+      upc, asin, title, brand, retail,
+      startPrice, binPrice, goalSale, buyerFee, profit,
+      userImg: "", amazonUrl
+    };
     state.items.unshift(item);
     save();
     setLast(item);
     repaint();
 
-    // Play cheer if you added cheer.mp3 and un-commented <audio> in HTML:
+    // Optional cheer:
     // try { el.cheer && el.cheer.play().catch(()=>{}); } catch {}
 
     setTimeout(()=>{ scanBusy = false; }, 900);
@@ -135,7 +160,6 @@
 
   // ---- Camera (single handler, debounced)
   let running=false, handlerRef=null;
-
   function attachHandler(){
     if (!window.Quagga) return;
     if (handlerRef){ try{ window.Quagga.offDetected(handlerRef); }catch{} handlerRef=null; }
@@ -184,7 +208,7 @@
     else { alert("Scan an item first, then snap."); }
   }
 
-  // ---- Export: WooCommerce CSV (Images column left BLANK)
+  // ---- Export: WooCommerce CSV (images left blank)
   function exportWooCsv(){
     const headers = [
       "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
@@ -193,17 +217,16 @@
     const rows = [headers];
 
     state.items.forEach((it,i)=>{
-      const images = ""; // leave blank (no internet images, base64 not supported by Woo CSV)
+      const images = ""; // leave blank for Woo CSV
       rows.push([
         it.title || `Item ${i+1}`,                // Name
         it.upc || "",                              // SKU
         it.binPrice ? it.binPrice.toFixed(2) : "", // Regular price = BIN (80% retail)
-        "",                                        // Sale price
-        "",                                        // Categories
+        "", "",                                    // Sale price, Categories
         it.brand || "",                            // Brands
         "", "",                                    // Tags, Short description
-        it.amazonUrl ? `Amazon: ${it.amazonUrl}` : "", // Description (optional: quick ref link)
-        images,                                    // Images (blank)
+        it.amazonUrl ? `Amazon: ${it.amazonUrl}` : "", // Description (optional)
+        images,                                    // Images
         "1","1","visible","publish"
       ]);
     });
@@ -224,9 +247,13 @@
       state.palletCost = Number(el.palletCost?.value || 0);
       state.palletLabel = String(el.palletLabel?.value || "");
       state.targetItems = Number(el.targetItems?.value || 0);
+
       let pct = Number(el.startPct?.value || 0);
       if (pct > 1) pct = pct / 100;   // allow "23" or "0.23"
       state.startPct = isFinite(pct) ? Math.max(0, pct) : 0;
+
+      state.startMode = el.startMode ? (el.startMode.value || "pct") : "pct";
+
       save(); repaint();
     });
 
@@ -235,14 +262,18 @@
       state.palletLabel = prompt("Pallet ID/Label:", "") || "";
       state.palletCost = Number(prompt("Pallet Cost ($):", "") || 0);
       state.targetItems = Number(prompt("Target items on pallet (optional):", "") || 0);
-      let p = prompt("Start % of Retail (e.g., 23 for 23%):", "");
+      // default to current mode; change here if you prefer to force 'pct'
+      // state.startMode = "pct";
+      const p = prompt("Start % of Retail (e.g., 23 for 23%):", "");
       if (p !== null){
         let x = Number(p); if (x > 1) x = x/100;
         state.startPct = isFinite(x) ? Math.max(0, x) : 0;
       }
       state.items = [];
       save(); repaint();
-      if (el.startPct) el.startPct.value = state.startPct ? Math.round(state.startPct*100) : "";
+
+      if (el.startPct)  el.startPct.value  = state.startPct ? Math.round(state.startPct*100) : "";
+      if (el.startMode) el.startMode.value = state.startMode || "pct";
     });
 
     on(el.startCam,"click",startCamera);
@@ -266,11 +297,12 @@
   // ---- boot
   document.addEventListener("DOMContentLoaded",()=>{
     load();
-    if (el.truckCost)  el.truckCost.value  = state.truckCost || "";
-    if (el.palletCost) el.palletCost.value = state.palletCost || "";
-    if (el.palletLabel)el.palletLabel.value= state.palletLabel || "";
-    if (el.targetItems)el.targetItems.value= state.targetItems || "";
-    if (el.startPct)   el.startPct.value   = state.startPct ? Math.round(state.startPct*100) : "";
+    if (el.truckCost)   el.truckCost.value   = state.truckCost || "";
+    if (el.palletCost)  el.palletCost.value  = state.palletCost || "";
+    if (el.palletLabel) el.palletLabel.value = state.palletLabel || "";
+    if (el.targetItems) el.targetItems.value = state.targetItems || "";
+    if (el.startPct)    el.startPct.value    = state.startPct ? Math.round(state.startPct*100) : "";
+    if (el.startMode)   el.startMode.value   = state.startMode || "pct";
     repaint();
     bind();
 
