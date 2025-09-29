@@ -1,11 +1,9 @@
-// ===== Sir Scansalot — Start Mode switch ($1 or %), Profit calc, Free-only lookup, No internet images =====
+// ===== Sir Scansalot — Qty per item, Start Mode switch, Profit calc, Free-only lookup, No internet images =====
 (() => {
-  // ---- helpers
   const $ = (id) => document.getElementById(id);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
   const money = (n) => (Number(n) || 0).toFixed(2);
 
-  // ---- elements
   const el = {
     truckCost: $("truckCost"),
     palletCost: $("palletCost"),
@@ -32,11 +30,35 @@
     newPallet: $("newPallet"),
     exportCsv: $("exportCsv"),
     clearPallet: $("clearPallet"),
-    // cheer: $("cheer") // if you add cheer.mp3
+    toastHost: $("toast"),
   };
 
-  // ---- state
-  const SKEY = "bb_pallet_v4";
+  // --- Toast helper ---
+  function toast(msg) {
+    const host = el.toastHost;
+    if (!host) return;
+    const div = document.createElement("div");
+    div.className = "toast-bubble";
+    div.textContent = msg;
+    host.appendChild(div);
+    setTimeout(() => div.remove(), 1400);
+    try { navigator.vibrate && navigator.vibrate(40); } catch {}
+  }
+
+  // --- Recent-scan de-dupe ---
+  const recently = new Map(); // upc -> expiresAt
+  const DEDUPE_MS = 3000;
+  function isRecentlyScanned(upc) {
+    const now = Date.now();
+    for (const [k, t] of recently) if (t <= now) recently.delete(k);
+    const t = recently.get(upc);
+    return t && t > now;
+  }
+  function markScanned(upc) {
+    recently.set(upc, Date.now() + DEDUPE_MS);
+  }
+
+  const SKEY = "bb_pallet_v5";
   const state = {
     truckCost: 0,
     palletCost: 0,
@@ -44,17 +66,18 @@
     targetItems: 0,
     startPct: 0,        // 0.23 => 23%
     startMode: "pct",   // 'pct' or 'dollar'
-    items: []           // { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, userImg, amazonUrl }
+    items: []           // { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
   };
 
   function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(SKEY) || "{}")); }catch{} }
   function save(){ localStorage.setItem(SKEY, JSON.stringify(state)); }
 
-  const cpi = () => (state.palletCost ? state.palletCost / (state.items.length || state.targetItems || 1) : 0);
+  const totalUnits = () => state.items.reduce((s, it) => s + (Number(it.qty)||0), 0);
+  const cpi = () => (state.palletCost ? state.palletCost / (totalUnits() || state.targetItems || 1) : 0);
 
   function repaint(){
     if (el.palletId) el.palletId.textContent = state.palletLabel || "—";
-    if (el.count) el.count.textContent = state.items.length;
+    if (el.count) el.count.textContent = totalUnits();
     if (el.cpi) el.cpi.textContent = money(cpi());
     if (el.startPctView) el.startPctView.textContent = `${Math.round((state.startPct||0)*100)}%`;
     if (el.retailLast) el.retailLast.textContent = state.items[0] ? money(state.items[0].retail || 0) : "0.00";
@@ -78,6 +101,13 @@
           <td>$${money(it.goalSale || 0)}</td>
           <td>$${money(it.buyerFee || 0)}</td>
           <td>$${money(it.profit || 0)}</td>
+          <td>
+            <div class="qtywrap">
+              <button class="qbtn" data-i="${i}" data-delta="-1">−</button>
+              <input class="qtyinp" data-i="${i}" type="number" min="1" value="${it.qty || 1}">
+              <button class="qbtn" data-i="${i}" data-delta="1">+</button>
+            </div>
+          </td>
           <td>${img ? `<img class="thumb" src="${img}" />` : ""}</td>
         `;
         el.tbody.appendChild(tr);
@@ -94,7 +124,7 @@
         ${img ? `<img class="thumb" src="${img}" />` : ""}
         <div>
           <strong>${it.title || "Item"}</strong>
-          <div class="small">UPC: ${it.upc || ""}${asinLine} • Brand: ${it.brand || ""}</div>
+          <div class="small">UPC: ${it.upc || ""}${asinLine} • Brand: ${it.brand || ""} • Qty: ${it.qty || 1}</div>
           <div class="small">
             Retail $${money(it.retail||0)} • Start (${state.startMode === "dollar" ? "$1 flat" : (Math.round((state.startPct||0)*100)+'%')}) $${money(it.startPrice||0)}
             • BIN 80% $${money(it.binPrice||0)}
@@ -108,15 +138,16 @@
     `;
   }
 
-  // ---- Add item (free-only lookup, lock to avoid loops)
+  // Add or update (merge same UPC into same row by increasing qty?)
+  // We will NOT auto-merge different scans; you can scan once then adjust qty.
   let scanBusy = false;
 
   async function addUPC(upc){
     upc = String(upc||"").replace(/\D/g,"");
     if (!upc || scanBusy) return;
+    if (isRecentlyScanned(upc)) { toast("Already captured"); return; }
     scanBusy = true;
 
-    // Free lookup (UPCItemDB trial via backend)
     let asin="", title="", brand="", retail=0, amazonUrl="";
     try{
       const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
@@ -130,35 +161,27 @@
       }
     }catch{}
 
-    // Start / BIN / Goal / Fee / Profit
     let startPrice = 0;
-    if (state.startMode === "dollar") {
-      startPrice = 1; // $1 flat start
-    } else {
-      startPrice = retail ? (retail * (state.startPct || 0)) : 0; // % of retail
-    }
-    const binPrice = retail ? (retail * 0.80) : 0;   // 80% of retail
-    const goalSale = retail ? (retail * 0.38) : 0;  // 38% of retail
-    const buyerFee = goalSale * 0.12;               // 12% buyer fee
+    if (state.startMode === "dollar") startPrice = 1;
+    else startPrice = retail ? (retail * (state.startPct || 0)) : 0;
+
+    const binPrice = retail ? (retail * 0.80) : 0;
+    const goalSale = retail ? (retail * 0.38) : 0;
+    const buyerFee = goalSale * 0.12;
     const profit   = (goalSale + buyerFee) - startPrice;
 
-    const item = {
-      upc, asin, title, brand, retail,
-      startPrice, binPrice, goalSale, buyerFee, profit,
-      userImg: "", amazonUrl
-    };
+    const item = { upc, asin, title, brand, retail, startPrice, binPrice, goalSale, buyerFee, profit, qty: 1, userImg: "", amazonUrl };
     state.items.unshift(item);
     save();
     setLast(item);
     repaint();
 
-    // Optional cheer:
-    // try { el.cheer && el.cheer.play().catch(()=>{}); } catch {}
-
+    toast("✅ Item captured!");
+    markScanned(upc);
     setTimeout(()=>{ scanBusy = false; }, 900);
   }
 
-  // ---- Camera (single handler, debounced)
+  // Camera
   let running=false, handlerRef=null;
   function attachHandler(){
     if (!window.Quagga) return;
@@ -167,13 +190,13 @@
     handlerRef=(res)=>{
       const code = res?.codeResult?.code || "";
       if (!code || code === last) return;
+      if (isRecentlyScanned(code)) return;
       last = code;
       addUPC(code);
       setTimeout(()=>{ last = ""; }, 800);
     };
     window.Quagga.onDetected(handlerRef);
   }
-
   function startCamera(){
     if (running) return;
     if (!window.Quagga){ alert("Scanner library not loaded. Check internet."); return; }
@@ -187,14 +210,13 @@
       attachHandler(); window.Quagga.start(); running=true;
     });
   }
-
   function stopCamera(){
     if (!running || !window.Quagga) return;
     try{ if (handlerRef) window.Quagga.offDetected(handlerRef); }catch{}
     window.Quagga.stop(); running=false; handlerRef=null;
   }
 
-  // ---- Snapshot attaches ONLY your photo to the latest item
+  // Snapshot attaches ONLY your photo to the latest item
   function snapPhoto(){
     const video = el.live && el.live.querySelector("video");
     if (!video){ alert("Start camera first."); return; }
@@ -208,7 +230,31 @@
     else { alert("Scan an item first, then snap."); }
   }
 
-  // ---- Export: WooCommerce CSV (images left blank)
+  // Qty handlers (event delegation on tbody)
+  on(el.tbody, "click", (e) => {
+    const btn = e.target.closest(".qbtn");
+    if (!btn) return;
+    const idx = Number(btn.dataset.i);
+    const delta = Number(btn.dataset.delta || 0);
+    const it = state.items[idx];
+    if (!it) return;
+    const next = Math.max(1, (Number(it.qty)||1) + delta);
+    it.qty = next;
+    save(); repaint();
+  });
+
+  on(el.tbody, "change", (e) => {
+    const inp = e.target.closest(".qtyinp");
+    if (!inp) return;
+    const idx = Number(inp.dataset.i);
+    const it = state.items[idx];
+    if (!it) return;
+    let v = Math.max(1, Math.floor(Number(inp.value)||1));
+    it.qty = v;
+    save(); repaint();
+  });
+
+  // Export: WooCommerce CSV (Stock = qty)
   function exportWooCsv(){
     const headers = [
       "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
@@ -227,7 +273,8 @@
         "", "",                                    // Tags, Short description
         it.amazonUrl ? `Amazon: ${it.amazonUrl}` : "", // Description (optional)
         images,                                    // Images
-        "1","1","visible","publish"
+        String(Math.max(1, Number(it.qty)||1)),   // Stock = qty
+        "1","visible","publish"
       ]);
     });
 
@@ -240,7 +287,6 @@
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
 
-  // ---- events
   function bind(){
     on(el.saveSession,"click",()=>{
       state.truckCost = Number(el.truckCost?.value || 0);
@@ -249,7 +295,7 @@
       state.targetItems = Number(el.targetItems?.value || 0);
 
       let pct = Number(el.startPct?.value || 0);
-      if (pct > 1) pct = pct / 100;   // allow "23" or "0.23"
+      if (pct > 1) pct = pct / 100;
       state.startPct = isFinite(pct) ? Math.max(0, pct) : 0;
 
       state.startMode = el.startMode ? (el.startMode.value || "pct") : "pct";
@@ -262,8 +308,6 @@
       state.palletLabel = prompt("Pallet ID/Label:", "") || "";
       state.palletCost = Number(prompt("Pallet Cost ($):", "") || 0);
       state.targetItems = Number(prompt("Target items on pallet (optional):", "") || 0);
-      // default to current mode; change here if you prefer to force 'pct'
-      // state.startMode = "pct";
       const p = prompt("Start % of Retail (e.g., 23 for 23%):", "");
       if (p !== null){
         let x = Number(p); if (x > 1) x = x/100;
@@ -294,7 +338,6 @@
     });
   }
 
-  // ---- boot
   document.addEventListener("DOMContentLoaded",()=>{
     load();
     if (el.truckCost)   el.truckCost.value   = state.truckCost || "";
