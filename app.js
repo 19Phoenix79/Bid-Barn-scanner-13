@@ -1,4 +1,4 @@
-// ===== Sir Scansalot — Render-ready: Camera + Quagga, Auto Start% = CPI/Retail, Qty, Desc to CSV, Toast + De-dupe =====
+// ===== Sir Scansalot — Per-Unit Retail (pack detection), Camera close-focus, Auto Start%=CPI/Retail, Qty, CSV, Toast, De-dupe =====
 (() => {
   const $ = (id) => document.getElementById(id);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -10,7 +10,7 @@
     palletLabel: $("palletLabel"),
     targetItems: $("targetItems"),
     startPct: $("startPct"),     // manual override if >0, else AUTO
-    startMode: $("startMode"),   // keep 'pct' vs '$1' option
+    startMode: $("startMode"),   // 'pct' or 'dollar'
     startPctView: $("startPctView"),
     palletId: $("palletId"),
     count: $("count"),
@@ -44,7 +44,7 @@
     try { navigator.vibrate && navigator.vibrate(40); } catch {}
   }
 
-  // --- Recent-scan de-dupe ---
+  // --- Duplicate-scan guard ---
   const recently = new Map(); // upc -> expiresAt
   const DEDUPE_MS = 3000;
   function isRecentlyScanned(upc) {
@@ -57,21 +57,50 @@
     recently.set(upc, Date.now() + DEDUPE_MS);
   }
 
-  const SKEY = "bb_pallet_render_v1";
+  // --- Detect "pack of N" in product titles and return N (defaults to 1) ---
+  function detectPackQty(title = "") {
+    const patterns = [
+      /pack of\s*(\d+)/i,     // "pack of 12"
+      /(\d+)\s*pack\b/i,      // "12 pack"
+      /(\d+)\s*pk\b/i,        // "12 pk"
+      /(\d+)\s*ct\b/i,        // "12 ct"
+      /(\d+)\s*count\b/i,     // "12 count"
+      /x\s*(\d+)\b/i          // "x12"
+    ];
+    for (const re of patterns) {
+      const m = String(title).match(re);
+      if (m && m[1]) {
+        const n = parseInt(m[1], 10);
+        if (Number.isFinite(n) && n > 1) return n;
+      }
+    }
+    return 1;
+  }
+
+  // --- Local retail cache so once you set a retail it auto-fills next time ---
+  const retailCacheKey = "bb_retail_cache_v1";
+  let retailCache = {};
+  try { retailCache = JSON.parse(localStorage.getItem(retailCacheKey) || "{}"); } catch {}
+  function saveRetailCache(){ localStorage.setItem(retailCacheKey, JSON.stringify(retailCache)); }
+
+  // --- App state ---
+  const SKEY = "bb_pallet_v8";
   const state = {
     truckCost: 0,
     palletCost: 0,
     palletLabel: "",
-    targetItems: 0,
-    startPct: 0,        // 0 => AUTO
-    startMode: "pct",
-    items: []           // { upc, asin, title, brand, retail, desc, startPrice, startPctComputed, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
+    targetItems: 0,     // if >0, use for CPI; else use current units
+    startPct: 0,        // manual override if >0; 0/blank => AUTO (CPI/Retail)
+    startMode: "pct",   // or "dollar"
+    items: []           // each: { upc, asin, title, brand, retail (per unit), packQty, desc, startPrice, startPctComputed, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
   };
 
   function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(SKEY) || "{}")); }catch{} }
   function save(){ localStorage.setItem(SKEY, JSON.stringify(state)); }
 
   const totalUnits = () => state.items.reduce((s, it) => s + (Number(it.qty)||0), 0);
+
+  // CPI display uses targetItems if set; else current total units (min 1)
   function currentCPI() {
     const denom = (state.targetItems && state.targetItems > 0) ? state.targetItems : Math.max(1, totalUnits());
     return state.palletCost ? (state.palletCost / denom) : 0;
@@ -82,6 +111,7 @@
     if (el.count) el.count.textContent = totalUnits();
     if (el.cpi) el.cpi.textContent = money(currentCPI());
 
+    // Header Start%: show manual override if set, else last item's computed %
     let pctHeader = state.startPct > 0 ? (state.startPct * 100) : 0;
     if (!(pctHeader > 0) && state.items[0] && state.items[0].startPctComputed > 0) {
       pctHeader = state.items[0].startPctComputed * 100;
@@ -98,8 +128,13 @@
         if ((it.profit||0) > 0) tr.classList.add("profit-positive");
         if ((it.profit||0) < 0) tr.classList.add("profit-negative");
         const img = it.userImg || "";
+
+        const perUnit = (it.retail && it.retail > 0) ? `$${money(it.retail)}` : "$0.00";
+        const packNote = (it.packQty && it.packQty > 1)
+          ? ` <span class="small" style="color:#9aa4b2;">(per unit, pack ${it.packQty})</span>`
+          : "";
         const retailHtml = (it.retail && it.retail > 0)
-          ? `$${money(it.retail)}`
+          ? `${perUnit}${packNote}`
           : `$0.00 <button class="qbtn" data-i="${i}" data-act="set-retail">Set</button>`;
 
         tr.innerHTML = `
@@ -132,6 +167,7 @@
     const asinLine = it.asin ? ` • ASIN: ${it.asin}` : "";
     const img = it.userImg || "";
     const shortDesc = (it.desc || "").slice(0, 180);
+    const packNote = (it.packQty && it.packQty > 1) ? ` (per unit, pack ${it.packQty})` : "";
     el.lastItem.innerHTML = `
       <div style="display:flex;gap:10px;align-items:center">
         ${img ? `<img class="thumb" src="${img}" />` : ""}
@@ -139,7 +175,7 @@
           <strong>${it.title || "Item"}</strong>
           <div class="small">UPC: ${it.upc || ""}${asinLine} • Brand: ${it.brand || ""} • Qty: ${it.qty || 1}</div>
           <div class="small">
-            Retail $${money(it.retail||0)} • Start $${money(it.startPrice||0)}${(it.startPctComputed>0)?` (${Math.round(it.startPctComputed*100)}% of retail)`:""}
+            Retail $${money(it.retail||0)}${packNote} • Start $${money(it.startPrice||0)}${(it.startPctComputed>0)?` (${Math.round(it.startPctComputed*100)}% of retail)`:""}
             • BIN 80% $${money(it.binPrice||0)}
           </div>
           <div class="small">
@@ -152,6 +188,7 @@
     `;
   }
 
+  // Generate fallback description if none from API
   function genDesc(it){
     const parts = [];
     if (it.brand) parts.push(it.brand);
@@ -162,26 +199,27 @@
   }
 
   // Compute prices for a NEW item
-  function computePricesForNewItem(retail) {
+  function computePricesForNewItem(retailPerUnit) {
     const denom = (state.targetItems && state.targetItems > 0)
       ? state.targetItems
-      : Math.max(1, totalUnits() + 1); // include new unit
+      : Math.max(1, totalUnits() + 1); // include the new unit
     const cpiNew = state.palletCost ? (state.palletCost / denom) : 0;
 
     let startPrice = 0, startPctComputed = 0;
     if (state.startMode === "dollar") {
       startPrice = 1;
-      startPctComputed = retail > 0 ? (1 / retail) : 0;
+      startPctComputed = retailPerUnit > 0 ? (1 / retailPerUnit) : 0;
     } else if (state.startPct && state.startPct > 0) {
       startPctComputed = state.startPct;
-      startPrice = retail > 0 ? (retail * state.startPct) : 0;
+      startPrice = retailPerUnit > 0 ? (retailPerUnit * state.startPct) : 0;
     } else {
-      startPrice = cpiNew; // AUTO = your cost per item
-      startPctComputed = retail > 0 ? (cpiNew / retail) : 0;
+      // AUTO = your cost per item
+      startPrice = cpiNew;
+      startPctComputed = retailPerUnit > 0 ? (cpiNew / retailPerUnit) : 0;
     }
 
-    const binPrice = retail ? (retail * 0.80) : 0;
-    const goalSale = retail ? (retail * 0.38) : 0;
+    const binPrice = retailPerUnit ? (retailPerUnit * 0.80) : 0;
+    const goalSale = retailPerUnit ? (retailPerUnit * 0.38) : 0;
     const buyerFee = goalSale * 0.12;
     const profit   = (goalSale + buyerFee) - startPrice;
 
@@ -208,26 +246,43 @@
     if (isRecentlyScanned(upc)) { toast("Already captured"); return; }
     scanBusy = true;
 
-    let asin="", title="", brand="", retail=0, amazonUrl="", desc="";
-    try{
-      const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
-      const j = await r.json();
-      if (j.ok){
-        asin = j.asin || "";
-        title = j.title || "";
-        brand = j.brand || "";
-        retail = Number(j.retail || 0);
-        amazonUrl = j.amazon_url || "";
-        desc = j.description || "";
-      }
-    }catch{}
+    let asin="", title="", brand="", retail=0, amazonUrl="", desc="", packQty=1;
+
+    // 1) Try local retail cache first
+    if (retailCache[upc] && Number(retailCache[upc]) > 0) {
+      retail = Number(retailCache[upc]);
+    } else {
+      // 2) Call backend trial API
+      try{
+        const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
+        const j = await r.json();
+        if (j.ok){
+          asin = j.asin || "";
+          title = j.title || "";
+          brand = j.brand || "";
+          retail = Number(j.retail || 0);   // this may be PACK price
+          amazonUrl = j.amazon_url || "";
+          desc = j.description || "";
+
+          // Adjust for multipacks: compute per-unit retail using title heuristics
+          packQty = detectPackQty(title);
+          if (packQty > 1 && retail > 0) {
+            retail = retail / packQty; // per-unit price for all app calcs
+          }
+
+          if (retail > 0) { retailCache[upc] = retail; saveRetailCache(); }
+        }
+      }catch{}
+    }
 
     if (!desc) desc = genDesc({ brand, title, retail });
 
     const calc = computePricesForNewItem(retail);
 
     const item = {
-      upc, asin, title, brand, retail,
+      upc, asin, title, brand,
+      retail,                 // per-unit retail now
+      packQty: packQty || 1,  // remember detected pack size (defaults to 1)
       desc,
       startPrice: calc.startPrice,
       startPctComputed: calc.startPctComputed,
@@ -248,7 +303,7 @@
     setTimeout(()=>{ scanBusy = false; }, 900);
   }
 
-  // Camera + Quagga
+  // Camera + Quagga with close-focus tuning
   let running=false, handlerRef=null;
   function attachHandler(){
     if (!window.Quagga) return;
@@ -263,6 +318,7 @@
     };
     window.Quagga.onDetected(handlerRef);
   }
+
   function startCamera(){
     // Must be on HTTPS (or localhost)
     if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
@@ -272,24 +328,65 @@
     if (running) return;
     if (!window.Quagga){ alert("Scanner library not loaded. Check internet."); return; }
 
+    const constraints = {
+      facingMode: { ideal: "environment" },
+      width:      { ideal: 1280 },
+      height:     { ideal: 720 },
+      advanced: [
+        { focusMode: "continuous" },
+        { focusMode: "near" },
+        { focusDistance: 0 },
+        { zoom: 2 }
+      ]
+    };
+
     const cfg = {
       inputStream:{
         type:"LiveStream",
         target: el.live,
-        constraints:{ facingMode:"environment" }
+        constraints
       },
       decoder:{ readers:["ean_reader","upc_reader","upc_e_reader","code_128_reader","ean_8_reader"] },
       locate:true,
-      numOfWorkers: navigator.hardwareConcurrency || 2
+      numOfWorkers: navigator.hardwareConcurrency || 2,
+      locator: { halfSample: false, patchSize: "medium" }
     };
-    window.Quagga.init(cfg,(err)=>{
+
+    window.Quagga.init(cfg, async (err)=>{
       if (err){ console.error(err); alert("Camera init failed. Allow camera & HTTPS."); return; }
-      attachHandler(); window.Quagga.start(); running=true;
-      // add a visible <video> so users see preview even if Quagga hides it
+      attachHandler();
+      window.Quagga.start();
+      running = true;
+
       const v = el.live.querySelector("video");
       if (v) { v.setAttribute("playsinline", "true"); v.style.width = "100%"; }
+
+      // Re-apply close-focus settings on the active track
+      try {
+        const stream = v && v.srcObject;
+        const track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+        const caps  = track && track.getCapabilities ? track.getCapabilities() : null;
+
+        const applyIf = async (obj) => { try { await track.applyConstraints(obj); } catch {} };
+
+        if (track && caps) {
+          if (caps.focusMode && caps.focusMode.includes("continuous")) {
+            await applyIf({ advanced: [{ focusMode: "continuous" }] });
+          } else if (caps.focusMode && caps.focusMode.includes("near")) {
+            await applyIf({ advanced: [{ focusMode: "near" }] });
+          }
+          if (typeof caps.focusDistance === "object") {
+            await applyIf({ advanced: [{ focusDistance: caps.focusDistance.min }] });
+          }
+          if (typeof caps.zoom === "object") {
+            const z = Math.min(2, caps.zoom.max || 2);
+            await applyIf({ advanced: [{ zoom: z }] });
+          }
+        }
+      } catch(e) { /* best effort */ }
     });
   }
+
   function stopCamera(){
     if (!running || !window.Quagga) return;
     try{ if (handlerRef) window.Quagga.offDetected(handlerRef); }catch{}
@@ -319,10 +416,13 @@
 
     const act = btn.dataset.act || "";
     if (act === "set-retail") {
-      const val = prompt("Enter retail price for this item:", it.retail || "");
+      const val = prompt("Enter retail price (per unit) for this item:", it.retail || "");
       const r = Number(val);
       if (isFinite(r) && r >= 0) {
-        it.retail = r;
+        it.retail = r;                      // store per-unit retail
+        retailCache[it.upc] = r;            // remember for future scans
+        saveRetailCache();
+
         const recalc = computePricesForNewItem(it.retail);
         it.startPrice = recalc.startPrice;
         it.startPctComputed = recalc.startPctComputed;
@@ -353,7 +453,7 @@
     save(); repaint();
   });
 
-  // Export Woo CSV
+  // Export: WooCommerce CSV — includes Description; Stock = qty
   function exportWooCsv(){
     const headers = [
       "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
@@ -367,7 +467,7 @@
       rows.push([
         it.title || `Item ${i+1}`,                // Name
         it.upc || "",                              // SKU
-        it.binPrice ? it.binPrice.toFixed(2) : "", // Regular price = BIN (80% retail)
+        it.binPrice ? it.binPrice.toFixed(2) : "", // Regular price = BIN (80% retail per unit)
         "", "",                                    // Sale price, Categories
         it.brand || "",                            // Brands
         "", "",                                    // Tags, Short description
