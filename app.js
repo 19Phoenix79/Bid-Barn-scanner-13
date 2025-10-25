@@ -369,28 +369,23 @@
 
   // ------- Manifest CSV Import (B-Stock) -------
   // Expanded mappings & robust parsing
-  const H = {
-    // UPC-like (accepts many B-Stock/manifest variations; SKU is fallback if numeric)
+    const H = {
     upc: [
-      "upc","upc code","upc_code","upc/ean","upc_ean","item upc","product upc",
-      "barcode","barcode number","barcode_no","bar code","ean","ean13","ean-13","ean_13",
-      "gtin","gtin14","gtin-14","upc-12","upc12","upc-14"
+      "upc","upc code","upc_code","upc/ean","barcode","ean","gtin",
+      "scan lp #","sb #"
     ],
-    // Titles / names / descriptions (prefer product title if present)
     title: [
-      "product title","item title","title","item name","name","product name",
-      "description","product description","long description","short description"
+      "product title","item title","title","item name","name",
+      "item description","product description","description"
     ],
-    brand: ["brand","brand name","manufacturer","mfr","mfg","vendor"],
-    qty: ["qty","quantity","units","unit qty","unit quantity","qta","case qty","count"],
-    // per-unit retail / msrp / list price
+    brand: ["brand","brand name","manufacturer","mfr","vendor"],
+    qty: ["qty","quantity","units","unit qty","unit quantity","count"],
     retail: [
-      "unit retail","unit msrp","unit price msrp","msrp","retail","retail price",
-      "suggested retail","list price","price"
+      "unit retail","unit msrp","msrp","retail","retail price",
+      "suggested retail","list price","ext. retail"
     ],
-    sku: ["sku","item number","item #","model","mpn","manufacturer part number"]
+    sku: ["sku","item number","model #","model","mpn"]
   };
-
   // normalize header text (remove punctuation/space, lowercase)
   function norm(s){
     return String(s || "")
