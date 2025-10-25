@@ -1,4 +1,4 @@
-// ===== Sir Scansalot — Scanner + B-Stock Manifest Import, per-unit retail, camera close-focus, auto Start%=CPI/Retail, qty, CSV, toast, de-dupe =====
+// ===== Sir Scansalot — Scanner + B-Stock Manifest Import (expanded header map, delimiter auto-detect, SKU→UPC fallback) =====
 (() => {
   const $ = (id) => document.getElementById(id);
   const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
@@ -63,7 +63,7 @@
     recently.set(upc, Date.now() + DEDUPE_MS);
   }
 
-  // --- Detect "pack of N" in product titles and return N (defaults to 1) ---
+  // --- Detect "pack of N" in titles ---
   function detectPackQty(title = "") {
     const patterns = [
       /pack of\s*(\d+)/i, /(\d+)\s*pack\b/i, /(\d+)\s*pk\b/i,
@@ -94,12 +94,11 @@
     targetItems: 0,
     startPct: 0,
     startMode: "pct",
-    items: [] // { upc, asin, title, brand, retail(per unit), packQty, desc, startPrice, startPctComputed, binPrice, goalSale, buyerFee, profit, qty, userImg, amazonUrl }
+    items: []
   };
 
   function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(SKEY) || "{}")); }catch{} }
   function save(){ localStorage.setItem(SKEY, JSON.stringify(state)); }
-
   const totalUnits = () => state.items.reduce((s, it) => s + (Number(it.qty)||0), 0);
 
   function currentCPI() {
@@ -211,7 +210,7 @@
       startPctComputed = state.startPct;
       startPrice = retailPerUnit > 0 ? (retailPerUnit * state.startPct) : 0;
     } else {
-      startPrice = cpiNew; // AUTO = your cost per item
+      startPrice = cpiNew; // AUTO = cost per item
       startPctComputed = retailPerUnit > 0 ? (cpiNew / retailPerUnit) : 0;
     }
 
@@ -236,11 +235,9 @@
 
     let asin="", title="", brand="", retail=0, amazonUrl="", desc="", packQty=1;
 
-    // 1) Try local retail cache first
     if (retailCache[upc] && Number(retailCache[upc]) > 0) {
       retail = Number(retailCache[upc]);
     } else {
-      // 2) Call backend trial API
       try{
         const r = await fetch(`/api/lookup?upc=${encodeURIComponent(upc)}`);
         const j = await r.json();
@@ -248,11 +245,10 @@
           asin = j.asin || "";
           title = j.title || "";
           brand = j.brand || "";
-          retail = Number(j.retail || 0);   // may be pack price
+          retail = Number(j.retail || 0);
           amazonUrl = j.amazon_url || "";
           desc = j.description || "";
 
-          // Heuristic for packs
           packQty = detectPackQty(title);
           if (packQty > 1 && retail > 0) retail = retail / packQty;
 
@@ -288,7 +284,7 @@
     setTimeout(()=>{ scanBusy = false; }, 900);
   }
 
-  // Camera + Quagga with close-focus tuning
+  // Camera + Quagga (close focus hints)
   let running=false, handlerRef=null;
   function attachHandler(){
     if (!window.Quagga) return;
@@ -372,29 +368,59 @@
   }
 
   // ------- Manifest CSV Import (B-Stock) -------
-  // Flexible header mapping (case-insensitive). Add common B-Stock names here.
+  // Expanded mappings & robust parsing
   const H = {
-    upc: ["upc","barcode","ean","upc_code","product upc","item upc","upc12","upc-12"],
-    title: ["title","product title","item name","name","description short","product_name"],
-    brand: ["brand","mfr","manufacturer","brand name"],
-    qty: ["qty","quantity","units","unit qty","unit quantity","QTY"],
-    retail: ["unit retail","unit msrp","unit price msrp","msrp","retail","retail price","suggested retail","list price","price"]
+    // UPC-like (accepts many B-Stock/manifest variations; SKU is fallback if numeric)
+    upc: [
+      "upc","upc code","upc_code","upc/ean","upc_ean","item upc","product upc",
+      "barcode","barcode number","barcode_no","bar code","ean","ean13","ean-13","ean_13",
+      "gtin","gtin14","gtin-14","upc-12","upc12","upc-14"
+    ],
+    // Titles / names / descriptions (prefer product title if present)
+    title: [
+      "product title","item title","title","item name","name","product name",
+      "description","product description","long description","short description"
+    ],
+    brand: ["brand","brand name","manufacturer","mfr","mfg","vendor"],
+    qty: ["qty","quantity","units","unit qty","unit quantity","qta","case qty","count"],
+    // per-unit retail / msrp / list price
+    retail: [
+      "unit retail","unit msrp","unit price msrp","msrp","retail","retail price",
+      "suggested retail","list price","price"
+    ],
+    sku: ["sku","item number","item #","model","mpn","manufacturer part number"]
   };
+
+  // normalize header text (remove punctuation/space, lowercase)
+  function norm(s){
+    return String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\uFEFF/g,"")        // strip BOM if present
+      .replace(/[^a-z0-9]+/g, " "); // collapse junk to spaces
+  }
 
   function findHeader(map, headerRow) {
     const idx = {};
-    const lower = headerRow.map(h => String(h || "").trim().toLowerCase());
+    const lower = headerRow.map(h => norm(h));
     for (const key in map) {
       for (const cand of map[key]) {
-        const j = lower.indexOf(String(cand).toLowerCase());
+        const j = lower.indexOf(norm(cand));
         if (j !== -1) { idx[key] = j; break; }
       }
     }
     return idx;
   }
 
-  // Robust CSV parser (handles quotes, embedded commas/newlines)
+  // Detect delimiter (comma or semicolon) and parse with quotes
   function parseCSV(text) {
+    // normalize line endings
+    text = String(text || "");
+    const firstLine = text.split(/\r?\n/)[0] || "";
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const semiCount  = (firstLine.match(/;/g) || []).length;
+    const delim = semiCount > commaCount ? ';' : ',';
+
     const rows = [];
     let i = 0, field = "", row = [], inQuotes = false;
     while (i < text.length) {
@@ -407,14 +433,14 @@
         field += c; i++; continue;
       } else {
         if (c === '"') { inQuotes = true; i++; continue; }
-        if (c === ',') { row.push(field); field=""; i++; continue; }
+        if (c === delim) { row.push(field); field=""; i++; continue; }
         if (c === '\r') { i++; continue; }
         if (c === '\n') { row.push(field); rows.push(row); row=[]; field=""; i++; continue; }
         field += c; i++; continue;
       }
     }
     row.push(field); rows.push(row);
-    // Trim trailing empty lines
+    // Trim trailing empty rows
     while (rows.length && rows[rows.length-1].every(x => x === "")) rows.pop();
     return rows;
   }
@@ -424,24 +450,24 @@
       const j = idx[k];
       return (j !== undefined) ? row[j] : "";
     };
+
+    // Prefer UPC field; if missing, use numeric SKU (8–14 digits) as a fallback
     let upc = String(get("upc") || "").replace(/\D/g,"");
+    if (!upc) {
+      const skuRaw = String(get("sku") || "").trim();
+      const digits = skuRaw.replace(/\D/g, "");
+      if (digits.length >= 8 && digits.length <= 14) upc = digits;
+    }
     if (upc.length === 13 && upc.startsWith("0")) upc = upc.slice(1);
+
     const title = String(get("title") || "").trim();
     const brand = String(get("brand") || "").trim();
     const qty = Math.max(1, parseInt(get("qty") || "1", 10) || 1);
 
-    // Prefer unit retail if present; otherwise try MSRP/Retail field and assume it's per unit.
     let retail = toFloat(get("retail"));
-    if (!retail || retail <= 0) retail = 0;
-
-    // If the title implies a pack and the manifest's retail looks like a pack price,
-    // our detectPackQty() will divide. If the CSV provides true unit retail, the division
-    // won’t happen because packQty will be 1 (no pack wording).
+    // If title implies a pack and the retail looks like a pack price, convert to per-unit
     const packQty = detectPackQty(title);
-    if (packQty > 1 && retail > 0) {
-      // If manifest price is obviously a pack, convert to per unit:
-      retail = retail / packQty;
-    }
+    if (packQty > 1 && retail > 0) retail = retail / packQty;
 
     const desc = (brand || title) ? `${brand ? brand + " " : ""}${title}` : "Manifest item";
 
@@ -460,9 +486,7 @@
       qty, userImg: "", amazonUrl: ""
     };
 
-    // Cache retail for future scans
     if (upc && retail > 0) { retailCache[upc] = retail; saveRetailCache(); }
-
     return item;
   }
 
@@ -474,24 +498,32 @@
     const header = rows[0];
     const idx = findHeader(H, header);
 
-    if (idx.upc === undefined || idx.title === undefined) {
-      alert("Missing required columns (need at least UPC and Title).");
+    // We require at least Title, and one of UPC or numeric SKU
+    const hasTitle = idx.title !== undefined;
+    const hasUPC   = idx.upc   !== undefined;
+    const hasSKU   = idx.sku   !== undefined;
+
+    if (!hasTitle || (!hasUPC && !hasSKU)) {
+      alert(
+        "Missing required columns (need at least Title, and UPC or numeric SKU).\n\n" +
+        "Headers I see:\n• " + header.map(h => `"${h}"`).join("\n• ")
+      );
       return;
     }
 
-    let imported = 0;
+    let importedUnits = 0, addedRows = 0;
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r];
-      if (!row || !row.length) continue;
+      if (!row || row.every(x => (x ?? "") === "")) continue;
       const item = buildItemFromManifest(row, idx);
-      // Skip rows without meaningful UPC or Title
       if (!item.title && !item.upc) continue;
 
       state.items.unshift(item);
-      imported += (Number(item.qty)||1);
+      addedRows += 1;
+      importedUnits += (Number(item.qty)||1);
     }
     save(); repaint();
-    toast(`📥 Imported ${imported} unit(s) from manifest`);
+    toast(`📥 Imported ${importedUnits} unit(s) from ${addedRows} manifest row(s)`);
   }
 
   // ------- Qty & Retail controls -------
@@ -556,7 +588,7 @@
         "", "",                                    // Sale price, Categories
         it.brand || "",                            // Brands
         "", "",                                    // Tags, Short description
-        description,                               // Long description
+        description,                               // Description
         images,                                    // Images
         String(Math.max(1, Number(it.qty)||1)),   // Stock
         "1","visible","publish"
@@ -625,7 +657,6 @@
       if (confirm("Clear all items for this pallet?")){ state.items = []; save(); repaint(); }
     });
 
-    // Manifest import triggers
     on(el.manifestBtn,"click",()=> el.manifestFile && el.manifestFile.click());
     on(el.manifestFile,"change",(e)=>{
       const f = e.target.files && e.target.files[0];
