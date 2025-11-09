@@ -1,3 +1,6 @@
+app.js
+
+
 // ===== Sir Scansalot — Per-Unit Retail (pack detection), Camera close-focus, Auto Start%=CPI/Retail, Qty, CSV, Toast, De-dupe =====
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -30,7 +33,14 @@
     newPallet: $("newPallet"),
     exportCsv: $("exportCsv"),
     clearPallet: $("clearPallet"),
+    on(el.importWTLBtn, "click", 
+    importWTLCSV);
     toastHost: $("toast"),
+  exportCsv: $("exportCsv"),
+  clearPallet: $("clearPallet"),
+  importWTLBtn: document.getElementById("importWTLBtn"), // <— add this line
+  toastHost: $("toast"),
+
   };
 
   // --- Toast helper ---
@@ -43,6 +53,32 @@
     setTimeout(() => div.remove(), 1400);
     try { navigator.vibrate && navigator.vibrate(40); } catch {}
   }
+
+// --- CSV number cleaner (safe to re-declare; replaces $ , () etc.) ---
+function normalizeNumber(val){
+  if (val == null) return 0;
+  const s = String(val).replace(/\(.*?\)/g, '').replace(/[^0-9.\-]/g, '');
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// --- Stock photo helper (Unsplash random image by query) ---
+async function fetchStockImage(query) {
+  if (!query) return "";
+  const q = encodeURIComponent(query);
+  const tries = [
+    `https://source.unsplash.com/600x600/?${q}`,
+    `https://source.unsplash.com/600x600/?product,${q}`
+  ];
+  // Use HEAD to follow redirect and capture final URL
+  for (const u of tries) {
+    try {
+      const r = await fetch(u, { method: "HEAD" });
+      if (r && r.url && !r.url.includes("source.unsplash")) return r.url;
+    } catch {}
+  }
+  return "";
+}
 
   // --- Duplicate-scan guard ---
   const recently = new Map(); // upc -> expiresAt
@@ -453,39 +489,41 @@
     save(); repaint();
   });
 
-  // Export: WooCommerce CSV — includes Description; Stock = qty
-  function exportWooCsv(){
-    const headers = [
-      "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
-      "Short description","Description","Images","Stock","In stock?","Catalog visibility","Status"
-    ];
-    const rows = [headers];
+ // Export: WooCommerce CSV — uses userImg as Images column
+function exportWooCsv(){
+  const headers = [
+    "Name","SKU","Regular price","Sale price","Categories","Brands","Tags",
+    "Short description","Description","Images","Stock","In stock?","Catalog visibility","Status"
+  ];
+  const rows = [headers];
 
-    state.items.forEach((it,i)=>{
-      const images = ""; // leave blank
-      const description = it.desc || "";
-      rows.push([
-        it.title || `Item ${i+1}`,                // Name
-        it.upc || "",                              // SKU
-        it.binPrice ? it.binPrice.toFixed(2) : "", // Regular price = BIN (80% retail per unit)
-        "", "",                                    // Sale price, Categories
-        it.brand || "",                            // Brands
-        "", "",                                    // Tags, Short description
-        description,                               // Long description
-        images,                                    // Images
-        String(Math.max(1, Number(it.qty)||1)),   // Stock
-        "1","visible","publish"
-      ]);
-    });
+  state.items.forEach((it,i)=>{
+    const images = it.userImg || ""; // <-- include stock photo URL
+    const description = it.desc || "";
+    rows.push([
+      it.title || `Item ${i+1}`,                // Name
+      it.upc || "",                              // SKU
+      it.binPrice ? it.binPrice.toFixed(2) : "", // Regular price = BIN (80%)
+      "",                                        // Sale price
+      "",                                        // Categories
+      it.brand || "",                            // Brands
+      "",                                        // Tags
+      "",                                        // Short description
+      description,                               // Description
+      images,                                    // Images (single URL)
+      String(Math.max(1, Number(it.qty)||1)),    // Stock
+      "1","visible","publish"
+    ]);
+  });
 
-    const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type:"text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sirscansalot_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  }
+  const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type:"text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `sirscansalot_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
 
   function bind(){
     on(el.saveSession,"click",()=>{
@@ -555,4 +593,89 @@
       console.warn("Quagga not loaded; scanner disabled. Manual entry still works.");
     }
   });
+
+// ================= Worldly Treasures Liquidations Importer =================
+
+// Make sure PapaParse is available (added in index.html)
+function importWTLCSV(){
+  if (!window.Papa){
+    alert("CSV parser not found. Please include papaparse.min.js");
+    return;
+  }
+
+  const pick = document.createElement("input");
+  pick.type = "file";
+  pick.accept = ".csv,text/csv";
+  pick.onchange = (e)=>{
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    window.Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: ({ data, meta }) => {
+        const REQUIRED = ["SKU","SCAN LP #","Item Description","Model #","QTY","Retail"];
+        const cols = (meta && meta.fields) ? meta.fields : Object.keys(data[0]||{});
+        const missing = REQUIRED.filter(h => !cols.includes(h));
+        if (missing.length){
+          alert(`Missing required columns:\n${missing.join(", ")}`);
+          return;
+        }
+
+        (async () => {
+          let added = 0;
+
+          for (const row of data){
+            const sku    = String(row["SKU"] ?? "").trim();
+            const upc    = String(row["SCAN LP #"] ?? "").replace(/\D/g,'');
+            const title  = String(row["Item Description"] ?? "").trim();
+            const model  = String(row["Model #"] ?? "").trim();
+            let   qty    = normalizeNumber(row["QTY"]);
+            let   retail = normalizeNumber(row["Retail"]);
+
+            if (!title || (!upc && !sku)) continue;
+            if (!qty || qty < 1) qty = 1;
+
+            const calc = computePricesForNewItem(retail);
+            const imgUrl = await fetchStockImage(title);  // fetch stock photo automatically
+
+            const item = {
+              upc: upc || sku,
+              asin: "",
+              title,
+              brand: "",
+              retail,
+              packQty: 1,
+              desc: (function buildDesc(){
+                const bits = [];
+                if (model) bits.push(`Model: ${model}`);
+                if (retail > 0) bits.push(`Approx. retail: $${money(retail)}.`);
+                bits.push("Condition not verified. See photos for details.");
+                return bits.join(" ");
+              })(),
+              startPrice: calc.startPrice,
+              startPctComputed: calc.startPctComputed,
+              binPrice: calc.binPrice,
+              goalSale: calc.goalSale,
+              buyerFee: calc.buyerFee,
+              profit: calc.profit,
+              qty,
+              userImg: imgUrl || "",   // image URL saved here
+              amazonUrl: ""
+            };
+
+            state.items.unshift(item);
+            added++;
+          }
+
+          save(); repaint();
+          if (added) { setLast(state.items[0]); toast(`Imported ${added} WTL item${added!==1?'s':''}`); }
+          else { alert("No valid WTL rows imported."); }
+        })();
+      }
+    });
+  };
+  pick.click();
+}
+
 })();
