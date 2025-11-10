@@ -18,67 +18,79 @@ function showToast(message) {
   setTimeout(() => (toast.style.opacity = 0), 4000);
 }
 
-// === Global item list ===
-let allItems = [];
+// === Progress bar helper ===
+function updateProgress(current, total) {
+  const container = document.getElementById("progressContainer");
+  const bar = document.getElementById("progressBar");
+  const text = document.getElementById("progressText");
 
-// -----------------------------
-// CSV Import Handler
-// -----------------------------
-csvInput.addEventListener("change", (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
+  if (!container || !bar || !text) return;
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const csvText = e.target.result;
-    const rows = csvText.split("\n").filter((r) => r.trim() !== "");
-    const headers = rows.shift().split(",").map((h) => h.trim().replace(/"/g, ""));
+  container.style.display = "block";
+  const percent = Math.round((current / total) * 100);
+  bar.style.width = `${percent}%`;
+  text.innerText = `Progress: ${percent}% (${current}/${total})`;
 
-    const parsedItems = rows.map((row) => {
-      const values = row.split(",").map((v) => v.replace(/^"|"$/g, "").trim());
-      const item = {};
-      headers.forEach((h, i) => (item[h] = values[i]));
-      return item;
-    });
-
-    allItems = parsedItems.filter((i) => i.sku || i.SKU);
-    console.log("✅ Imported items:", allItems.length, allItems);
-    showToast(`Loaded ${allItems.length} items from CSV`);
-  };
-
-  reader.readAsText(file);
-});
-
-// -----------------------------
-// Fetch stock photo from Unsplash
-// -----------------------------
-const UNSPLASH_ACCESS_KEY = "D5LVeLM5MZKOJNhrIkjJE72QA20KOhpCk71l1R99Guw";
-
-async function fetchStockPhoto(sku, desc, brand) {
-  try {
-    const query = encodeURIComponent(desc || brand || sku);
-    const response = await fetch(
-      `https://api.unsplash.com/search/photos?query=${query}&per_page=1&client_id=${UNSPLASH_ACCESS_KEY}`
-    );
-    const data = await response.json();
-    if (data.results && data.results.length > 0) {
-      return data.results[0].urls.small;
-    } else {
-      return `https://via.placeholder.com/600x600.png?text=${encodeURIComponent(desc || brand || sku)}`;
-    }
-  } catch (e) {
-    console.warn("Image fetch failed for", sku, e);
-    return `https://via.placeholder.com/600x600.png?text=${encodeURIComponent(sku)}`;
+  if (percent >= 100) {
+    setTimeout(() => {
+      container.style.display = "none";
+      bar.style.width = "0%";
+      text.innerText = "Progress: 0%";
+    }, 3000);
   }
 }
 
-// -----------------------------
-// Delay helper (to avoid spammy API hits)
-// -----------------------------
+// === Delay helper ===
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// === Global array for imported items ===
+let allItems = [];
+
 // -----------------------------
-// CSV Export Function
+// CSV Import (Worldly Treasures)
+// -----------------------------
+csvInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const text = await file.text();
+  const rows = text.split("\n").map((r) => r.trim()).filter(Boolean);
+  const headers = rows[0].split(",").map((h) => h.trim());
+  allItems = rows.slice(1).map((row) => {
+    const values = row.split(",");
+    const item = {};
+    headers.forEach((h, i) => (item[h] = values[i]));
+    return item;
+  });
+
+  showToast(`Loaded ${allItems.length} items from ${file.name}`);
+  console.log("Worldly Treasures items:", allItems);
+});
+
+// -----------------------------
+// Fetch stock photo via Unsplash or fallback
+// -----------------------------
+const UNSPLASH_ACCESS_KEY = "D5LVeLM5MZKOJNhrIkjJE72QA20KOhpCk71l1R99Guw";
+
+const fetchStockPhoto = async (sku, desc, brand) => {
+  try {
+    const query = encodeURIComponent(`${desc || brand || sku}`);
+    const url = `https://api.unsplash.com/photos/random?query=${query}&client_id=${UNSPLASH_ACCESS_KEY}`;
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Unsplash fetch failed");
+
+    const data = await res.json();
+    return data.urls?.small || data.urls?.regular;
+  } catch (e) {
+    console.warn("Unsplash image fetch failed for", sku, e);
+    const safeText = encodeURIComponent(desc?.slice(0, 60) || sku);
+    return `https://via.placeholder.com/600x600.png?text=${safeText}`;
+  }
+};
+
+// -----------------------------
+// Export WooCommerce CSV
 // -----------------------------
 function exportToCSV(items) {
   if (!items.length) {
@@ -90,7 +102,9 @@ function exportToCSV(items) {
   const csvRows = [headers.join(",")];
 
   for (const item of items) {
-    const values = headers.map((h) => `"${(item[h] ?? "").toString().replace(/"/g, '""')}"`);
+    const values = headers.map((h) =>
+      `"${(item[h] ?? "").toString().replace(/"/g, '""')}"`
+    );
     csvRows.push(values.join(","));
   }
 
@@ -118,30 +132,25 @@ exportBtn.addEventListener("click", async () => {
 
   const enrichedItems = [];
 
-  for (const item of allItems) {
-    const sku = item.sku || item.SKU || "";
-    const name = item.name || item.Name || "";
-    const brand = item.brand || item.Brand || "";
+  for (let i = 0; i < allItems.length; i++) {
+    const item = allItems[i];
 
-    // Fetch image
-    const imageUrl = await fetchStockPhoto(sku, name, brand);
+    // Calculate 80% BIN and cost placeholders
+    const retail = parseFloat(item.Retail || item.price || 0);
+    const binPrice = (retail * 0.8).toFixed(2);
+    const cost = (retail * 0.6).toFixed(2); // placeholder for now
 
-    // Placeholder for price logic:
-    const cost = parseFloat(item.cost || item.Cost || 0);
-    const startingPrice = cost; // starting auction price = cost
-    const binPrice = cost * 0.8; // BIN = 80% placeholder
+    const imageUrl = await fetchStockPhoto(item.sku, item.name, item.brand);
 
     enrichedItems.push({
-      sku,
-      name,
-      brand,
-      cost,
-      startingPrice,
-      binPrice,
+      ...item,
       imageUrl,
+      "BIN (80%)": binPrice,
+      Cost: cost,
     });
 
-    await delay(300); // avoid Unsplash rate limit
+    updateProgress(i + 1, allItems.length);
+    await delay(200); // gentle pacing for API
   }
 
   showToast("Image lookup complete. Generating CSV...");
