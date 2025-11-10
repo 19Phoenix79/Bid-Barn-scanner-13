@@ -193,35 +193,71 @@ document.addEventListener("DOMContentLoaded", () => {
     showToast("Pallet cleared 🗑️");
   });
 
-  // --- DuckDuckGo image search helper ---
-  async function fetchDuckImage(query) {
-    // Query examples: 'SKU image' or 'product name image'
-    const endpoint = "https://duckduckgo.com/i.js?q=" + encodeURIComponent(query);
-    try {
-      const res = await fetch(endpoint, { headers: { "Accept": "application/json" } });
-      if (!res.ok) throw new Error("DDG returned " + res.status);
-      const j = await res.json();
-      // 'results' array; pick first 'image' or 'thumbnail'
-      if (Array.isArray(j.results) && j.results.length) {
-        return j.results[0].image || j.results[0].thumbnail || null;
-      }
-      // If no results field, bail
-      return null;
-    } catch (err) {
-      console.warn("DuckDuckGo image fetch failed for", query, err);
-      return null;
+// ---- Fetch stock photo via DuckDuckGo Image Search (with placeholder fallback) ----
+const fetchStockPhoto = async (sku, desc, brand) => {
+  try {
+    const query = encodeURIComponent(`${brand || ''} ${desc || ''} ${sku} product photo`);
+    const response = await fetch(`https://duckduckgo.com/i.js?q=${query}&iax=images&ia=images`, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn("DuckDuckGo fetch failed:", response.status);
+      throw new Error(`HTTP ${response.status}`);
     }
+
+    const data = await response.json();
+
+    if (data && data.results && data.results.length > 0) {
+      const firstImg = data.results[0].image;
+      console.log(`✅ Found image for [${sku}]:`, firstImg);
+      return firstImg;
+    }
+
+    // If no results, use placeholder
+    console.warn(`⚠️ No DuckDuckGo results for ${sku}`);
+    return `https://via.placeholder.com/600x600.png?text=${encodeURIComponent(desc?.slice(0, 60) || sku)}`;
+
+  } catch (err) {
+    console.warn("DuckDuckGo image fetch failed for", sku, err);
+    return `https://via.placeholder.com/600x600.png?text=${encodeURIComponent(desc?.slice(0, 60) || sku)}`;
   }
+};
+
 
   // Delay helper
   const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  // --- Export to WooCommerce CSV (with images) ---
-  exportBtn.addEventListener("click", async () => {
-    if (!allItems.length) { showToast("No items to export"); return; }
+ // --- Export to WooCommerce CSV (with images) ---
+exportBtn.addEventListener("click", async () => {
+  if (!allItems.length) {
+    showToast("No items to export");
+    return;
+  }
 
-    showToast("Starting image lookup (this may take a moment)...");
-    console.log("Export: fetching images for", allItems.length, "items...");
+  showToast("Starting image lookup (this may take a moment)...");
+  console.log("Export: fetching images for", allItems.length, "items...");
+
+  const enrichedItems = [];
+
+  for (const item of allItems) {
+    // Fetch image from DuckDuckGo or fallback placeholder
+    const imageUrl = await fetchStockPhoto(item.sku, item.name, item.brand);
+    enrichedItems.push({ ...item, imageUrl });
+    await delay(300); // gentle delay between requests (prevents blocking)
+  }
+
+  // Now continue your CSV export logic
+  console.log("Finished fetching images. Ready to export:", enrichedItems.length);
+  showToast("Image lookup complete. Preparing CSV...");
+
+  // build CSV from enrichedItems (replace allItems in your CSV generator)
+  exportToCSV(enrichedItems);
+});
+
+
 
     // For each item, try to fetch image (prefer SKU then name)
     for (let i = 0; i < allItems.length; i++) {
