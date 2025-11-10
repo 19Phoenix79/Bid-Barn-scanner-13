@@ -1,16 +1,18 @@
-Index.html
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Sir Scansalot</title>
+
+  <!-- Styles -->
   <link rel="stylesheet" href="./styles.css" />
+
   <!-- Quagga2 for live camera barcode scanning -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
 </head>
 <body>
+  <!-- Header -->
   <header class="top">
     <div class="brand">
       <h1>👑 Sir Scansalot</h1>
@@ -26,7 +28,9 @@ Index.html
     </div>
   </header>
 
+  <!-- Main content -->
   <main class="wrap">
+    <!-- Session setup -->
     <section class="card">
       <h2>Session</h2>
       <div class="grid2">
@@ -34,6 +38,133 @@ Index.html
         <div class="row"><label>Pallet Cost ($)</label><input id="palletCost" type="number" inputmode="decimal" placeholder="e.g., 650.00" /></div>
         <div class="row"><label>Pallet ID / Label</label><input id="palletLabel" type="text" placeholder="e.g., A-03" /></div>
         <div class="row"><label>Target Items on Pallet</label><input id="targetItems" type="number" inputmode="numeric" placeholder="e.g., 1200" /></div>
+        <div class="row"><label>Start % of Retail</label><input id="startPct" type="number" inputmode="decimal" placeholder="leave blank for AUTO" /></div>
+        <div class="row">
+          <label>Start Mode</label>
+          <select id="startMode">
+            <option value="pct" selected>% of Retail (manual override)</option>
+            <option value="dollar">$1 Flat (optional)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row gap">
+        <button id="saveSession" class="btn">Save</button>
+        <button id="newPallet" class="btn">Start New Pallet</button>
+      </div>
+      <div class="small">
+        If Start % is blank/0, the app uses <b>Cost-Per-Item ÷ Retail</b> automatically.<br>
+        BIN = <b>Retail × 0.80</b>. Profit assumes sale at <b>38%</b> + <b>12% buyer fee</b>.
+      </div>
+    </section>
+
+    <!-- Scan & Capture -->
+    <section class="card">
+      <h2>Scan & Capture</h2>
+      <div class="row gap">
+        <button id="startCam" class="btn primary">🎥 Start Camera</button>
+        <button id="stopCam" class="btn">⏹ Stop</button>
+        <button id="snapBtn" class="btn">📸 Capture Photo</button>
+      </div>
+      <div id="live" class="live"></div>
+      <canvas id="snapCanvas" width="640" height="480" style="display:none"></canvas>
+      <div class="row">
+        <input id="upcInput" type="text" inputmode="numeric" placeholder="Manual UPC" />
+        <button id="addManual" class="btn">Add</button>
+      </div>
+    </section>
+
+    <!-- Last item -->
+    <section class="card">
+      <h2>Last Item</h2>
+      <div id="lastItem" class="small">—</div>
+    </section>
+
+    <!-- Pallet items -->
+    <section class="card">
+      <h2>Items on This Pallet</h2>
+      <div class="row gap">
+        <!-- B-Stock import -->
+        <button id="manifestBtn" class="btn">📥 Import Manifest CSV (B-Stock)</button>
+        <input id="manifestFile" type="file" accept=".csv" style="display:none" />
+
+        <!-- Worldly Treasures import -->
+        <button id="worldlyBtn" class="btn">🌎 Import CSV (Worldly Treasures)</button>
+        <input id="worldlyFile" type="file" accept=".csv" style="display:none" />
+
+        <!-- Exports and clear -->
+        <button id="exportCsv" class="btn">⬇️ Export CSV (WooCommerce)</button>
+        <button id="clearPallet" class="btn danger">🗑 Clear Pallet Items</button>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>UPC</th>
+              <th>Name</th>
+              <th>Brand</th>
+              <th>Retail</th>
+              <th>Start</th>
+              <th>BIN (80%)</th>
+              <th>Goal Sale (38%)</th>
+              <th>Buyer Fee (12%)</th>
+              <th>Profit</th>
+              <th>Qty</th>
+              <th>Photo</th>
+              <th>SKU</th>
+              <th>SCAN LP #</th>
+              <th>Item Description</th>
+              <th>Model #</th>
+              <th>WT QTY</th>
+              <th>WT Retail</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Footer -->
+  <footer class="top">
+    <div class="small">© 2025 Bid Barn</div>
+  </footer>
+
+  <!-- Script -->
+  <script src="./app.js" defer></script>
+
+  <!-- File Button Triggers -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // B-Stock file picker trigger
+      const manifestBtn = document.getElementById('manifestBtn');
+      const manifestFile = document.getElementById('manifestFile');
+      manifestBtn.addEventListener('click', () => manifestFile.click());
+
+      // Worldly Treasures file picker trigger
+      const worldlyBtn = document.getElementById('worldlyBtn');
+      const worldlyFile = document.getElementById('worldlyFile');
+      worldlyBtn.addEventListener('click', () => worldlyFile.click());
+
+      // Optional feedback when files selected
+      manifestFile.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) console.log('Selected B-Stock CSV:', file.name);
+      });
+
+      worldlyFile.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) console.log('Selected Worldly Treasures CSV:', file.name);
+      });
+    });
+  </script>
+</body>
+</html>
         <div class="row"><label>Start % of Retail</label><input id="startPct" type="number" inputmode="decimal" placeholder="leave blank for AUTO" /></div>
         <div class="row">
           <label>Start Mode</label>
