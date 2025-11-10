@@ -5,11 +5,13 @@
 // === Config ===
 const UNSPLASH_ACCESS_KEY = "D5LVeLM5MZKOJNhrIkjJE72QA20KOhpCk71l1R99Guw";
 
-// === Elements ===
+// === Selectors ===
+const worldlyFile = document.getElementById("worldlyFile");
+const manifestFile = document.getElementById("manifestFile");
 const exportBtn = document.getElementById("exportCsv");
 const toast = document.getElementById("toast");
 
-// === Toast Notifications ===
+// === Toast Notification ===
 function showToast(message) {
   if (!toast) {
     console.log("Toast:", message);
@@ -20,38 +22,75 @@ function showToast(message) {
   setTimeout(() => (toast.style.opacity = 0), 4000);
 }
 
-// ======================================================
-// Example item array (replace this with imported data)
-// ======================================================
-let allItems = [
-  {
-    sku: "1010438319",
-    name: "S7A WASHLET ELONGATED ELECTRIC HEATE",
-    brand: "TOTO",
-    retail: 1209.0,
-    cost: 1314.0,
-    qty: 1
-  },
-  {
-    sku: "1005437420",
-    name: "Merryfield 49 in. Sink Vanity",
-    brand: "Home Decorators",
-    retail: 1105.0,
-    cost: 52.0,
-    qty: 1
-  },
-  {
-    sku: "1005581779",
-    name: "Brightling 67 in. Freestanding Bathtub",
-    brand: "Glacier Bay",
-    retail: 972.79,
-    cost: 432.0,
-    qty: 1
-  }
-];
+// === App State ===
+let allItems = [];
 
 // ======================================================
-// Unsplash image search helper
+// CSV Parser (simple split-based, works for WT + B-Stock)
+// ======================================================
+function parseCSV(text) {
+  const rows = text.split(/\r?\n/).filter((r) => r.trim() !== "");
+  const headers = rows[0].split(",").map((h) => h.trim());
+  const items = [];
+
+  for (let i = 1; i < rows.length; i++) {
+    const cols = rows[i].split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((c) => c.trim());
+    const obj = {};
+    headers.forEach((h, j) => (obj[h] = cols[j]));
+    items.push(obj);
+  }
+  return items;
+}
+
+// ======================================================
+// File Readers
+// ======================================================
+worldlyFile?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showToast(`Importing ${file.name}...`);
+
+  const text = await file.text();
+  const parsed = parseCSV(text);
+
+  // Normalize Worldly Treasures format
+  allItems = parsed.map((r) => ({
+    sku: r["SKU"]?.trim() || "",
+    name: r["Item Description"]?.trim() || "",
+    brand: r["Brand"]?.trim() || "Unknown",
+    retail: parseFloat((r["Retail"] || r["WT Retail"] || "0").replace(/[^0-9.]/g, "")) || 0,
+    cost: parseFloat((r["Wholesale"] || "0").replace(/[^0-9.]/g, "")) || 0,
+    qty: parseInt(r["Qty"] || r["WT QTY"] || 1),
+  }));
+
+  showToast(`Worldly Treasures items loaded: ${allItems.length}`);
+  console.log("Worldly Treasures items:", allItems);
+});
+
+manifestFile?.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  showToast(`Importing ${file.name}...`);
+
+  const text = await file.text();
+  const parsed = parseCSV(text);
+
+  // Normalize B-Stock format
+  allItems = parsed.map((r) => ({
+    sku: r["Item ID"]?.trim() || r["Product ID"]?.trim() || "",
+    name: r["Title"]?.trim() || r["Item Description"]?.trim() || "",
+    brand: r["Brand"]?.trim() || "Unknown",
+    retail: parseFloat((r["Retail Price"] || "0").replace(/[^0-9.]/g, "")) || 0,
+    cost: parseFloat((r["Your Cost"] || "0").replace(/[^0-9.]/g, "")) || 0,
+    qty: parseInt(r["Quantity"] || 1),
+  }));
+
+  showToast(`B-Stock items loaded: ${allItems.length}`);
+  console.log("B-Stock items:", allItems);
+});
+
+// ======================================================
+// Unsplash Image Search
 // ======================================================
 async function fetchStockPhoto(sku, desc, brand) {
   const query = encodeURIComponent(`${brand || ""} ${desc || sku}`.trim());
@@ -75,12 +114,12 @@ async function fetchStockPhoto(sku, desc, brand) {
 }
 
 // ======================================================
-// Delay helper (rate-limit friendly)
+// Delay helper
 // ======================================================
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ======================================================
-// CSV Export Function
+// CSV Export
 // ======================================================
 function exportToCSV(items) {
   if (!items.length) {
@@ -103,15 +142,13 @@ function exportToCSV(items) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `WooCommerce_Export_${new Date()
-    .toISOString()
-    .slice(0, 10)}.csv`;
+  link.download = `WooCommerce_Export_${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
 
 // ======================================================
-// Export button logic
+// Export Button Logic
 // ======================================================
 if (exportBtn) {
   exportBtn.addEventListener("click", async () => {
@@ -120,17 +157,15 @@ if (exportBtn) {
       return;
     }
 
-    showToast("Fetching images from Unsplash...");
+    showToast("Fetching Unsplash images...");
     const enrichedItems = [];
 
     for (const item of allItems) {
-      // Compute BIN price (80% retail)
       const binPrice = item.retail * 0.8;
-
-      // Auction starting price = cost
       const startPrice = item.cost;
 
       const imageUrl = await fetchStockPhoto(item.sku, item.name, item.brand);
+
       enrichedItems.push({
         SKU: item.sku,
         Name: item.name,
@@ -138,15 +173,15 @@ if (exportBtn) {
         Retail: item.retail.toFixed(2),
         Cost: item.cost.toFixed(2),
         "BIN 80%": binPrice.toFixed(2),
-        "Auction Start ($)": startPrice.toFixed(2),
+        "Auction Start": startPrice.toFixed(2),
         Qty: item.qty,
-        Image: imageUrl
+        Image: imageUrl,
       });
 
-      await delay(300); // polite rate limit
+      await delay(300); // avoid Unsplash rate limit
     }
 
-    showToast("Building CSV file...");
+    showToast("Building WooCommerce CSV...");
     exportToCSV(enrichedItems);
     showToast("WooCommerce CSV exported successfully!");
   });
