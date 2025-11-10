@@ -3,8 +3,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const worldlyFile = document.getElementById("worldlyFile");
   const manifestBtn = document.getElementById("manifestBtn");
   const manifestFile = document.getElementById("manifestFile");
+  const exportBtn = document.getElementById("exportCsv");
   const tbody = document.getElementById("tbody");
   const toast = document.getElementById("toast");
+
+  let allItems = [];
 
   /* --- Toast helper --- */
   const showToast = (msg) => {
@@ -31,6 +34,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!file) return;
     console.log("Selected B-Stock CSV:", file.name);
     parseCsvFile(file, "bstock");
+  });
+
+  /* --- Export Button --- */
+  exportBtn.addEventListener("click", () => {
+    if (!allItems.length) return showToast("⚠️ No items to export!");
+    exportToWooCsv(allItems);
   });
 
   /* --- Core Parser --- */
@@ -67,12 +76,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const qtyIdx = header.indexOf("qty");
 
     const items = rows.slice(1).map((r, i) => ({
-      num: i + 1,
+      num: allItems.length + i + 1,
       upc: r[upcIdx] || "",
       name: r[nameIdx] || "",
       brand: r[brandIdx] || "",
       retail: parseFloat(r[retailIdx]?.replace(/[^\d.]/g, "")) || 0,
       qty: parseInt(r[qtyIdx] || 1),
+      type: "B-Stock",
     }));
 
     appendItems(items, "B-Stock");
@@ -89,8 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const retailIdx = header.indexOf("retail");
 
     const items = rows.slice(1).map((r, i) => ({
-      num: i + 1,
-      upc: "",
+      num: allItems.length + i + 1,
       sku: r[skuIdx] || "",
       scan: r[scanIdx] || "",
       name: r[descIdx] || "",
@@ -98,6 +107,8 @@ document.addEventListener("DOMContentLoaded", () => {
       qty: parseInt(r[qtyIdx] || 1),
       retail: parseFloat(r[retailIdx]?.replace(/[^\d.]/g, "")) || 0,
       brand: "",
+      upc: "",
+      type: "Worldly Treasures",
     }));
 
     appendItems(items, "Worldly Treasures");
@@ -106,6 +117,9 @@ document.addEventListener("DOMContentLoaded", () => {
   /* --- Append rows to table --- */
   function appendItems(items, label) {
     if (!items.length) return showToast(`⚠️ No valid ${label} items found`);
+
+    allItems = allItems.concat(items);
+
     for (const item of items) {
       const tr = document.createElement("tr");
       tr.innerHTML = `
@@ -131,5 +145,55 @@ document.addEventListener("DOMContentLoaded", () => {
       tbody.appendChild(tr);
     }
     showToast(`✅ Imported ${items.length} ${label} items`);
+  }
+
+  /* --- Export WooCommerce CSV --- */
+  function exportToWooCsv(items) {
+    // WooCommerce CSV column structure (basic version)
+    const headers = [
+      "ID",
+      "Type",
+      "SKU",
+      "Name",
+      "Published",
+      "Is featured?",
+      "Visibility in catalog",
+      "Short description",
+      "Description",
+      "Regular price",
+      "In stock?",
+      "Stock",
+    ];
+
+    const lines = [headers.join(",")];
+
+    items.forEach((it, idx) => {
+      const line = [
+        idx + 1,
+        "simple",
+        `"${it.sku || it.upc || ""}"`,
+        `"${it.name.replace(/"/g, '""')}"`,
+        "1",
+        "0",
+        "visible",
+        "",
+        "",
+        it.retail.toFixed(2),
+        "1",
+        it.qty,
+      ];
+      lines.push(line.join(","));
+    });
+
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "woo_products.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast("⬇️ WooCommerce CSV exported!");
+    console.log("✅ WooCommerce CSV generated with", items.length, "items");
   }
 });
