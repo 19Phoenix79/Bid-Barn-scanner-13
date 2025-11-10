@@ -1,271 +1,224 @@
-// ==========================
-// Sir Scansalot - app.js
-// ==========================
-
-// --- GLOBAL STATE ---
-let items = [];
-let session = {
-  truckCost: 0,
-  palletCost: 0,
-  palletLabel: "",
-  targetItems: 0,
-  startPct: 0,
-  startMode: "pct",
-};
-let videoRunning = false;
-
-// --- DOM HELPERS ---
+// === Helper functions ===
 const $ = (id) => document.getElementById(id);
-const fmt = (n) => (isNaN(n) ? "0.00" : Number(n).toFixed(2));
 
-// --- TOAST MESSAGES ---
 function toast(msg) {
-  const el = $("toast");
-  el.textContent = msg;
-  el.className = "show";
-  setTimeout(() => (el.className = ""), 2500);
+  const t = document.createElement("div");
+  t.className = "toast-bubble";
+  t.textContent = msg;
+  $("toast").appendChild(t);
+  setTimeout(() => t.remove(), 1500);
 }
 
-// --- SESSION SAVE ---
-$("saveSession").addEventListener("click", () => {
-  session.truckCost = parseFloat($("truckCost").value) || 0;
-  session.palletCost = parseFloat($("palletCost").value) || 0;
-  session.palletLabel = $("palletLabel").value.trim() || "—";
-  session.targetItems = parseInt($("targetItems").value) || 0;
-  session.startPct = parseFloat($("startPct").value) || 0;
-  session.startMode = $("startMode").value;
+function formatMoney(num) {
+  return "$" + (num || 0).toFixed(2);
+}
 
-  $("palletId").textContent = session.palletLabel;
+// === Global storage ===
+let palletItems = [];
 
-  toast("Session saved ✅");
-  updateStats();
-});
+// === Add Item to Table ===
+function addItem(item) {
+  palletItems.push(item);
+  renderTable();
+}
 
-// --- NEW PALLET ---
-$("newPallet").addEventListener("click", () => {
-  if (confirm("Start new pallet? This will clear current items.")) {
-    items = [];
-    $("tbody").innerHTML = "";
-    updateStats();
-    toast("New pallet started 🚛");
-  }
-});
+// === Render Table ===
+function renderTable() {
+  const tbody = $("itemTableBody");
+  tbody.innerHTML = "";
 
-// --- CAMERA SCAN (Quagga2) ---
-$("startCam").addEventListener("click", () => {
-  if (videoRunning) return;
-  videoRunning = true;
-  toast("Camera starting...");
+  let totalRetail = 0;
 
-  Quagga.init(
-    {
-      inputStream: {
-        type: "LiveStream",
-        constraints: { facingMode: "environment" },
-        target: document.querySelector("#live"),
-      },
-      decoder: { readers: ["ean_reader", "upc_reader", "upc_e_reader"] },
-    },
-    (err) => {
-      if (err) {
-        toast("Camera error");
-        console.error(err);
-        videoRunning = false;
-        return;
-      }
-      Quagga.start();
-      toast("Scanning...");
-    }
-  );
+  palletItems.forEach((item, i) => {
+    const tr = document.createElement("tr");
+    const profitClass = item.profit >= 0 ? "profit-positive" : "profit-negative";
+    tr.className = profitClass;
 
-  Quagga.onDetected((data) => {
-    const code = data.codeResult.code;
-    if (code) addItem({ upc: code });
+    const row = `
+      <td>${i + 1}</td>
+      <td>${item.upc || ""}</td>
+      <td>${item.name || ""}</td>
+      <td>${item.brand || ""}</td>
+      <td>${item.qty || 1}</td>
+      <td>${formatMoney(item.retail)}</td>
+      <td>${formatMoney((item.retail || 0) * (item.qty || 1))}</td>
+      <td>${item.source || ""}</td>
+      <td>${item.status || "Active"}</td>
+      <td>${formatMoney(item.profit || 0)}</td>
+    `;
+
+    tr.innerHTML = row;
+    tbody.appendChild(tr);
+
+    totalRetail += (item.retail || 0) * (item.qty || 1);
   });
-});
 
-$("stopCam").addEventListener("click", () => {
-  if (videoRunning) {
-    Quagga.stop();
-    videoRunning = false;
-    toast("Camera stopped ⏹");
-  }
-});
-
-// --- MANUAL ADD ---
-$("addManual").addEventListener("click", () => {
-  const upc = $("upcInput").value.trim();
-  if (!upc) return toast("Enter a UPC first");
-  addItem({ upc });
-  $("upcInput").value = "";
-});
-
-// --- SNAPSHOT ---
-$("snapBtn").addEventListener("click", () => {
-  const canvas = $("snapCanvas");
-  const live = document.querySelector("#live video");
-  if (!live) return toast("No camera feed");
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(live, 0, 0, canvas.width, canvas.height);
-  toast("📸 Snapshot taken");
-});
-
-// --- ADD ITEM ---
-function addItem({ upc, name = "", brand = "", retail = 0, qty = 1 }) {
-  const cpi = session.palletCost && session.targetItems
-    ? session.palletCost / session.targetItems
-    : 0;
-  let start = 0;
-
-  if (session.startMode === "pct") {
-    const pct = session.startPct || (cpi && retail ? (cpi / retail) * 100 : 0);
-    start = retail * (pct / 100);
-  } else {
-    start = 1;
-  }
-
-  const bin = retail * 0.8;
-  const goalSale = retail * 0.38;
-  const fee = goalSale * 0.12;
-  const profit = goalSale - cpi - fee;
-
-  const item = {
-    upc,
-    name,
-    brand,
-    retail,
-    start,
-    bin,
-    goalSale,
-    fee,
-    profit,
-    qty,
-  };
-
-  items.push(item);
-  renderItem(item);
-  updateStats();
+  $("totalValue").textContent = formatMoney(totalRetail);
 }
 
-// --- RENDER ITEM ROW ---
-function renderItem(item) {
-  const tbody = $("tbody");
-  const row = document.createElement("tr");
-  row.innerHTML = `
-    <td>${items.length}</td>
-    <td>${item.upc || ""}</td>
-    <td>${item.name || ""}</td>
-    <td>${item.brand || ""}</td>
-    <td>$${fmt(item.retail)}</td>
-    <td>$${fmt(item.start)}</td>
-    <td>$${fmt(item.bin)}</td>
-    <td>$${fmt(item.goalSale)}</td>
-    <td>$${fmt(item.fee)}</td>
-    <td>$${fmt(item.profit)}</td>
-    <td>${item.qty || 1}</td>
-    <td>—</td>
-    <td>SKU${items.length}</td>
-    <td>—</td>
-    <td>${item.name || ""}</td>
-    <td>—</td>
-    <td>${item.qty || 1}</td>
-    <td>$${fmt(item.retail)}</td>
-  `;
-  tbody.appendChild(row);
-
-  $("lastItem").textContent = `${item.upc} – ${item.name || "Unknown"} added`;
-}
-
-// --- UPDATE HEADER STATS ---
-function updateStats() {
-  const count = items.reduce((sum, i) => sum + (i.qty || 1), 0);
-  $("count").textContent = count;
-  const cpi =
-    count && session.palletCost ? session.palletCost / count : 0;
-  $("cpi").textContent = fmt(cpi);
-  const last = items[items.length - 1];
-  if (last) {
-    $("retailLast").textContent = fmt(last.retail);
-    $("binLast").textContent = fmt(last.bin);
+// === Export CSV ===
+$("exportCsv").addEventListener("click", () => {
+  if (!palletItems.length) {
+    toast("No items to export ❌");
+    return;
   }
-  $("startPctView").textContent = session.startPct + "%";
+
+  const headers = [
+    "UPC",
+    "Name",
+    "Brand",
+    "Retail",
+    "Qty",
+    "Source",
+    "Status",
+    "Profit",
+  ];
+  const rows = palletItems.map((i) =>
+    [
+      i.upc,
+      i.name,
+      i.brand,
+      i.retail,
+      i.qty,
+      i.source,
+      i.status,
+      i.profit,
+    ].join(",")
+  );
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "export.csv";
+  a.click();
+  toast("Exported CSV ✅");
+});
+
+// === Clear Pallet ===
+$("clearPallet").addEventListener("click", () => {
+  if (!confirm("Clear all items?")) return;
+  palletItems = [];
+  renderTable();
+  toast("Pallet cleared 🗑️");
+});
+
+// === CSV PARSER (handles commas, quotes, etc.) ===
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  return lines.map((line) => {
+    const result = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let char of line) {
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  });
 }
 
-// --- IMPORT B-STOCK CSV ---
+// === IMPORT B-STOCK CSV ===
+$("manifestBtn").addEventListener("click", () => {
+  console.log("📂 B-Stock button clicked");
+  $("manifestFile").click();
+});
+
 $("manifestFile").addEventListener("change", (e) => {
   const file = e.target.files[0];
-  if (!file) return;
+  if (!file) {
+    console.warn("⚠️ No file selected for B-Stock");
+    return;
+  }
+  console.log("📦 B-Stock file selected:", file.name);
+
   const reader = new FileReader();
   reader.onload = (ev) => {
-    const rows = ev.target.result.split(/\r?\n/);
-    rows.forEach((r) => {
-      const cols = r.split(",");
-      if (cols.length > 3 && cols[0] !== "UPC") {
+    const text = ev.target.result;
+    const rows = parseCSV(text);
+    console.log("✅ Parsed B-Stock CSV rows:", rows.slice(0, 5));
+
+    let imported = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const cols = rows[i];
+      if (cols && cols.length >= 4) {
         addItem({
           upc: cols[0],
           name: cols[1],
           brand: cols[2],
           retail: parseFloat(cols[3]) || 0,
           qty: parseInt(cols[4]) || 1,
+          source: "B-Stock",
+          profit: (parseFloat(cols[3]) || 0) * 0.2, // example profit
         });
+        imported++;
       }
-    });
-    toast("B-Stock CSV imported 📦");
+    }
+
+    toast(`Imported ${imported} B-Stock items ✅`);
+    e.target.value = ""; // allow re-upload
   };
-  reader.readAsText(file);
+
+  reader.onerror = (err) => {
+    console.error("❌ File read error:", err);
+    toast("Error reading CSV file");
+  };
+
+  reader.readAsText(file, "UTF-8");
 });
 
-// --- IMPORT WORLDLY TREASURES CSV ---
+// === IMPORT WORLDLY TREASURES CSV ===
+$("worldlyBtn").addEventListener("click", () => {
+  console.log("🌎 Worldly Treasures button clicked");
+  $("worldlyFile").click();
+});
+
 $("worldlyFile").addEventListener("change", (e) => {
   const file = e.target.files[0];
-  if (!file) return;
+  if (!file) {
+    console.warn("⚠️ No file selected for Worldly Treasures");
+    return;
+  }
+  console.log("🌍 Worldly file selected:", file.name);
+
   const reader = new FileReader();
   reader.onload = (ev) => {
-    const rows = ev.target.result.split(/\r?\n/);
-    rows.forEach((r) => {
-      const cols = r.split(",");
-      if (cols.length > 3 && cols[0] !== "UPC") {
+    const text = ev.target.result;
+    const rows = parseCSV(text);
+    console.log("✅ Parsed Worldly CSV rows:", rows.slice(0, 5));
+
+    let imported = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const cols = rows[i];
+      if (cols && cols.length >= 4) {
         addItem({
           upc: cols[0],
           name: cols[1],
           brand: cols[2],
           retail: parseFloat(cols[3]) || 0,
           qty: parseInt(cols[4]) || 1,
+          source: "Worldly Treasures",
+          profit: (parseFloat(cols[3]) || 0) * 0.3, // example profit
         });
+        imported++;
       }
-    });
-    toast("Worldly Treasures CSV imported 🌎");
+    }
+
+    toast(`Imported ${imported} Worldly Treasures items ✅`);
+    e.target.value = ""; // allow re-upload
   };
-  reader.readAsText(file);
-});
 
-// --- EXPORT WOO CSV ---
-$("exportCsv").addEventListener("click", () => {
-  if (!items.length) return toast("No items to export");
-  const header =
-    "UPC,Name,Brand,Retail,Start,BIN,GoalSale,Fee,Profit,Qty\n";
-  const rows = items
-    .map(
-      (i) =>
-        `${i.upc},"${i.name}","${i.brand}",${i.retail},${i.start},${i.bin},${i.goalSale},${i.fee},${i.profit},${i.qty}`
-    )
-    .join("\n");
-  const blob = new Blob([header + rows], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${session.palletLabel || "pallet"}_woo.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast("Exported WooCommerce CSV ✅");
-});
+  reader.onerror = (err) => {
+    console.error("❌ File read error:", err);
+    toast("Error reading CSV file");
+  };
 
-// --- CLEAR PALLET ---
-$("clearPallet").addEventListener("click", () => {
-  if (confirm("Clear all pallet items?")) {
-    items = [];
-    $("tbody").innerHTML = "";
-    updateStats();
-    toast("Pallet cleared 🗑");
-  }
+  reader.readAsText(file, "UTF-8");
 });
