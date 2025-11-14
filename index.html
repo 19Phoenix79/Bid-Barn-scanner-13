@@ -1,77 +1,120 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sir Scansalot WooCommerce Uploader</title>
-  <style>
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background-color: #121212;
-      color: #fff;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      margin: 0;
-    }
-
-    .container {
-      background-color: #2a2a2a;
-      padding: 2rem;
-      border-radius: 10px;
-      box-shadow: 0 0 10px rgba(0, 188, 212, 0.3);
-      text-align: center;
-      width: 380px;
-    }
-
-    h1 {
-      color: #00bcd4;
-      margin-bottom: 1rem;
-    }
-
-    input[type="file"] {
-      margin: 1rem 0;
-    }
-
-    button {
-      background-color: #00bcd4;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      color: #fff;
-      margin: 0.5rem;
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-
-    button:hover {
-      background-color: #0097a7;
-    }
-
-    #toast {
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      background: #333;
-      color: #fff;
-      padding: 10px;
-      border-radius: 5px;
-      opacity: 0;
-      transition: opacity 0.5s;
-    }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Sir Scansalot 2.0 – Bid Barn</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <h1>Sir Scansalot</h1>
-    <input type="file" id="importBtn" accept=".csv" />
-    <button id="exportBtn">Export to CSV</button>
-    <button id="uploadBtn">Upload to WooCommerce</button>
-  </div>
+  <header class="top">
+    <div class="brand">
+      <h1>👑 Sir Scansalot 2.0</h1>
+    </div>
+    <div class="statbar">
+      <div>Total Items: <strong id="statTotalItems">0</strong></div>
+      <div>Total Cost (Truck + Shipping + Fees): $<strong id="statTotalCost">0.00</strong></div>
+      <div>Cost Per Item (CPI): $<strong id="statCPI">0.00</strong></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- Truck / Cost Section -->
+    <section class="card">
+      <h2>1. Truck / Cost Info</h2>
+      <div class="grid2">
+        <div class="row">
+          <label>Total Truck Cost ($)</label>
+          <input id="truckCost" type="number" step="0.01" placeholder="e.g. 12000.00" />
+        </div>
+        <div class="row">
+          <label>Shipping Cost ($)</label>
+          <input id="shippingCost" type="number" step="0.01" placeholder="e.g. 1500.00" />
+        </div>
+        <div class="row">
+          <label>Other Fees ($)</label>
+          <input id="otherFees" type="number" step="0.01" placeholder="e.g. 300.00" />
+        </div>
+        <div class="row">
+          <label>Notes / Truck Name</label>
+          <input id="truckLabel" type="text" placeholder="e.g. WTL – Kitchen & Bath 27 Pallets" />
+        </div>
+      </div>
+      <div class="row gap">
+        <button id="btnSaveSession" class="btn primary">Save Cost Info</button>
+        <button id="btnNewSession" class="btn">Start New Session</button>
+      </div>
+      <div class="small">
+        CPI = (Truck Cost + Shipping + Other Fees) ÷ Total Units on Manifest.<br />
+        We’ll recompute CPI every time you change costs or import a new manifest.
+      </div>
+    </section>
+
+    <!-- Manifest Upload -->
+    <section class="card">
+      <h2>2. Upload Manifest CSV</h2>
+      <p class="small">
+        Expected columns: <b>SKU</b> and <b>Retail</b> are required. Optional: <b>Title</b>, <b>Qty</b>.<br />
+        Example headers: <code>SKU,Title,Retail,Qty</code>
+      </p>
+      <div class="row gap">
+        <button id="btnManifest" class="btn">📥 Choose Manifest CSV</button>
+        <input id="manifestFile" type="file" accept=".csv" style="display:none" />
+        <button id="btnClearItems" class="btn danger">🗑 Clear All Items</button>
+      </div>
+      <div class="small">
+        After import, CPI will be applied to every item. You can still tweak costs and re-export.
+      </div>
+    </section>
+
+    <!-- Items Table -->
+    <section class="card">
+      <h2>3. Items & Photos</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>SKU</th>
+              <th>Title</th>
+              <th>Retail</th>
+              <th>Qty</th>
+              <th>CPI (Cost / Item)</th>
+              <th>Auction Start</th>
+              <th>Photo</th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+      <div class="small">
+        CPI is shared across items. Auction Start defaults to CPI; you can override per item.<br />
+        Click “Add Photo” to take/upload a picture for that SKU.
+      </div>
+    </section>
+
+    <!-- Export -->
+    <section class="card">
+      <h2>4. Export Bid Barn CSV for WooCommerce</h2>
+      <p class="small">
+        This creates a CSV with columns suitable for All Import / All Export.<br />
+        <b>Images</b> column will contain a suggested filename (e.g. <code>123456789012.jpg</code>).<br />
+        After exporting, save your photos with those filenames and upload them to WordPress.
+      </p>
+      <div class="row gap">
+        <button id="btnExportCSV" class="btn primary">⬇️ Export Bid Barn CSV</button>
+      </div>
+    </section>
+  </main>
 
   <div id="toast"></div>
 
-  <script src="app.js"></script>
+  <footer class="top">
+    <div class="small">© 2025 Bid Barn – Sir Scansalot 2.0</div>
+  </footer>
+
+  <script src="./app.js"></script>
 </body>
 </html>
