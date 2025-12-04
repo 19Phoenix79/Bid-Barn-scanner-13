@@ -18,6 +18,30 @@
             </button>
             <span id="importStatus"></span>
         </div>
+        <!-- Universal CSV uploader -->
+<form id="univ-upload"
+      action="/upload-csv"
+      method="post"
+      enctype="multipart/form-data"
+      style="display:inline-block">
+
+  <input type="hidden" name="marketplace" id="mp-field">
+  <label style="cursor:pointer;background:#ff6600;color:#fff;padding:8px 12px;border-radius:4px">
+    <input type="file" name="csv_file" accept=".csv" required hidden>
+    <span id="mp-text">Upload CSV</span>
+  </label>
+</form>
+
+<script>
+const MP = {
+  "bstock.com": {text:"B-Stock CSV"},
+  "worldlytreasuresliquidation.com": {text:"WT CSV"},
+  "directliquidation.com": {text:"Direct CSV"}
+};
+const host = location.hostname.replace('www.','');
+document.getElementById('mp-field').value = host;
+document.getElementById('mp-text').textContent = MP[host]?.text || "Upload CSV";
+</script>
 
         <!-- Item Form -->
         <div class="form-section">
