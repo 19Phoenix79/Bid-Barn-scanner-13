@@ -1,267 +1,268 @@
-// ============================================================
-// SIR SCANSALOT 2.0 — FULL APP.JS (COMPLETE REWRITE)
-// Handles:
-// - Truck cost / CPI
-// - Manifest upload (auto-detect B-Stock, WTL, Amazon manifests)
-// - Photo capture
-// - Export for WooCommerce / Bid Barn CSV
-// ============================================================
+let items = [];
+let currentImage = null;
+let stream = null;
 
-const state = {
-  truckCost: 0,
-  shippingCost: 0,
-  otherFees: 0,
-  items: []
-};
-
-function money(v) {
-  return Number(v || 0).toFixed(2);
-}
-
-function cleanNumber(v) {
-  if (!v) return 0;
-  return Number(String(v).replace(/[^0-9.\-]/g, "")) || 0;
-}
-
-function totalUnits() {
-  return state.items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
-}
-
-function computeCPI() {
-  const totalCost = Number(state.truckCost) + Number(state.shippingCost) + Number(state.otherFees);
-  const units = totalUnits() || 1;
-  return totalCost / units;
-}
-
-function recalcPrices() {
-  const cpi = computeCPI();
-  state.items.forEach(it => {
-    it.cpi = cpi;
-    it.startPrice = cpi; // Auction Start defaults to CPI
-  });
-}
-
-function save() {
-  localStorage.setItem("bb_scansalot2", JSON.stringify(state));
-}
-
-function load() {
-  try {
-    const data = JSON.parse(localStorage.getItem("bb_scansalot2"));
-    if (data) Object.assign(state, data);
-  } catch {}
-}
-
-function render() {
-  const tbody = document.getElementById("itemsBody");
-  const totalItemsEl = document.getElementById("statTotalItems");
-  const totalCostEl = document.getElementById("statTotalCost");
-  const cpiEl = document.getElementById("statCPI");
-
-  tbody.innerHTML = "";
-  const cpi = computeCPI();
-
-  state.items.forEach((it, idx) => {
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-      <td>${idx + 1}</td>
-      <td>${it.sku}</td>
-      <td>${it.title}</td>
-      <td>$${money(it.retail)}</td>
-      <td>${it.qty}</td>
-      <td>$${money(it.cpi)}</td>
-      <td>$${money(it.startPrice)}</td>
-      <td>
-        <button class="btn qbtn" data-photo="${idx}">Add Photo</button>
-      </td>
-    `;
-
-    tbody.appendChild(tr);
-  });
-
-  totalItemsEl.textContent = totalUnits();
-  totalCostEl.textContent = money(Number(state.truckCost) + Number(state.shippingCost) + Number(state.otherFees));
-  cpiEl.textContent = money(cpi);
-
-  save();
-}
-
-function toast(msg) {
-  alert(msg); // simple temporary toast
-}
-
-// ============================================================
-// UNIVERSAL MANIFEST IMPORTER (B-STOCK, WTL, AMAZON)
-// ============================================================
-
-function importManifest(file) {
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (result) => {
-      const rows = result.data || [];
-      if (!rows.length) {
-        toast("No rows in CSV");
-        return;
-      }
-
-      const getField = (row, names) => {
-        const keys = Object.keys(row || {});
-        for (const name of names) {
-          const target = name.toLowerCase().trim();
-          const match = keys.find(k => k.toLowerCase().trim() === target);
-          if (match) return row[match];
-        }
-        return "";
-      };
-
-      let added = 0;
-
-      rows.forEach(row => {
-        const sku = String(getField(row, [
-          "SKU", "ITEM #", "Item #", "ASIN", "UPC", "Scan LP #", "ITEM"
-        ]) || "").trim();
-
-        const title = String(getField(row, [
-          "Title","Item Title","Description","Item Description","Item Name","Product Name"
-        ]) || "").trim();
-
-        const retail = cleanNumber(getField(row, [
-          "Retail","Retail Value","RETAIL VALUE","MSRP",
-          "List Price","Unit Price","Lot Item Price",
-          "Ext. Retail Value","EXT. RETAIL VALUE","Extended Retail"
-        ]));
-
-        let qty = cleanNumber(getField(row, [
-          "Qty","QTY","Quantity","Order Qty","QTY SHIPPED"
-        ]));
-        if (!qty || qty < 1) qty = 1;
-
-        if (!sku && !title) return;
-
-        state.items.push({
-          sku,
-          title: title || sku,
-          retail,
-          qty,
-          cpi: 0,
-          startPrice: 0,
-          imgData: "",
-          imgName: ""
-        });
-
-        added++;
-      });
-
-      recalcPrices();
-      render();
-      toast(`Imported ${added} items`);
-    }
-  });
-}
-
-// ============================================================
-// EXPORT BID BARN CSV FOR WOOCOMMERCE
-// ============================================================
-
-function exportBidBarnCsv() {
-  const rows = [];
-  rows.push([
-    "SKU","Name","Regular price","Stock","Images"
-  ]);
-
-  state.items.forEach(it => {
-    rows.push([
-      it.sku,
-      it.title,
-      money(it.startPrice),
-      it.qty,
-      it.imgName || ""
-    ]);
-  });
-
-  const csv = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "bidbarn_export.csv";
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ============================================================
-// PHOTO UPLOAD
-// ============================================================
-
-function attachPhoto(idx) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-
-  input.onchange = () => {
-    const file = input.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      state.items[idx].imgData = reader.result;
-      state.items[idx].imgName = `${state.items[idx].sku}.jpg`;
-      render();
-    };
-    reader.readAsDataURL(file);
-  };
-
-  input.click();
-}
-
-// ============================================================
-// BIND UI
-// ============================================================
-
-document.addEventListener("DOMContentLoaded", () => {
-  load();
-  render();
-
-  document.getElementById("btnSaveSession").onclick = () => {
-    state.truckCost = cleanNumber(document.getElementById("truckCost").value);
-    state.shippingCost = cleanNumber(document.getElementById("shippingCost").value);
-    state.otherFees = cleanNumber(document.getElementById("otherFees").value);
-    recalcPrices();
-    render();
-  };
-
-  document.getElementById("btnNewSession").onclick = () => {
-    if (confirm("Start new session? This clears items.")) {
-      state.items = [];
-      recalcPrices();
-      render();
-    }
-  };
-
-  document.getElementById("btnManifest").onclick = () => {
-    document.getElementById("manifestFile").click();
-  };
-
-  document.getElementById("manifestFile").onchange = (e) => {
+// CSV Import
+document.getElementById('csvFile').addEventListener('change', async (e) => {
     const file = e.target.files[0];
-    if (file) importManifest(file);
-  };
+    (!file) return;
 
-  document.getElementById("btnClearItems").onclick = () => {
-    if (confirm("Clear all items?")) {
-      state.items = [];
-      render();
-    }
-  };
-
-  document.getElementById("itemsBody").onclick = (e) => {
-    const btn = e.target.closest("button[data-photo]");
-    if (!btn) return;
-    attachPhoto(btn.dataset.photo);
-  };
-
-  document.getElementById("btnExportCsv").onclick = exportBidBarnCsv;
+    const text = await file.text();
+    const rows = parseCSV(text);
+    
+    items = rows.slice(1).map(row => ({
+        id: row[0],
+        name: row[1],
+        description: row[2],
+        imageUrl: row[3] || '',
+        sku: row[] || row[0],
+        startingBid: parseFloat(row[5]) || 0
+    }));
+    
+    document.getElementById('importStatus').textContent = `Imported ${items.length} items`;
+    renderItems();
 });
+
+// Parse CSV
+function parseCSV(text) {
+    return text.split('\n').map(row => 
+ row.split(',').map(cell => cell.replace(/"/g, '').trim())
+    ).filter(row => row.length > 1 && row[0]);
+}
+
+// Camera Functions
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia 
+            video: { facingMode: 'environment' } 
+        });
+        const video = document.getElementById('cameraFeed');
+        video.srcObject = stream;
+        video.style.display = 'block';
+        document.getElementById('captureBtn').style.display = 'inline-block';
+        document.getElementById('startCamera').style.display = 'none';
+    } catch (err) {
+        alert('Camera error: ' + err.message);
+    }
+}
+
+function captureImage() {
+    const video = document.getElementById('cameraFeed');
+    const canvas = document.getElementById('snapshotCanvas');
+    const img = document.getElementById('previewImage');
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    
+    currentImage = canvas.toDataURL('image/jpeg');
+    img.src = currentImage;
+    img.style.display = 'block';
+    
+    // Stop camera
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        video.style.display = 'none';
+        document.getElementById('captureBtn').style.display = 'none';
+        document.getElementById('uploadImage').style.display = 'inline-block';
+    }
+}
+
+// Upload to WordPress
+async function uploadImage() {
+    ifcurrentImage) return;
+    
+    const status = document.getElementById('importStatus');
+    status.text = 'Uploading...';
+    
+    try {
+        // Remove data:image/jpeg;base64, prefix
+        const base64Image = currentImage.split(',')[1];
+        const blob = await fetch(currentImage).then(r => r.blob());
+        
+        const formData = new FormData();
+        formData.append('file', blob, 'item_' + Date.now() + '.jpg');
+        
+        const response = await fetch('https://bidbarn.bid/wp-json/wp/v2/media', {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Basic ' + btoa('YOUR_WP_USERNAME:YOUR_APP_PASSWORD')
+            },
+            body: formData
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentImage = data.source_url;
+            status.textContent = '✅ Image uploaded!';
+            document.getElementById('uploadImage').style.display = 'none';
+        } else {
+            throw new Error('Upload failed: ' + response.status);
+        }
+    } catch (err) {
+        status.textContent = '❌ Upload failed: ' + err.message;
+    }
+}
+
+// Add Item
+function addItem() {
+    const item = {
+        id: document.getElementById('itemId').value,
+        name: document.getElementById('itemName').value,
+        description: document.getElementById('itemDesc').value,
+        sku: document.getElementById('itemSkuvalue,
+        startingBid: document.getElementById('startingBid').value,
+        imageUrl: currentImage || ''
+    };
+    
+    if (!item.id || !item.name) {
+        alert('ID and Name are required!');
+        return;
+    }
+    
+    items.push(item);
+    renderItems();
+    clearForm();
+}
+
+// Render Items
+function renderItems() {
+    const list = document.getElementById('itemsList');
+    list.innerHTML = items.map((item, index) => `
+        <div class="item-card">
+            <img src="${item.imageUrl}" class="item-image">
+            <div class="item-info">
+                <h3>${item.name}</h3>
+                <p>ID: ${item.id} | SKU: ${item.sku}</p>
+                <p>Starting: $${item.startingBid}</p>
+            </div>
+            <button onclick="removeItem(${index})">🗑️</button>
+        </div>
+    `).join('');
+    
+    document.getElementById('itemCount').textContent = items.length;
+}
+
+function removeItem(index) {
+    items.splice(index, 1);
+    renderItems();
+}
+
+function clearForm {
+    document.getElementById('itemId').value = '';
+    document.getElementById('itemName').value = '';
+    document.getElementById('itemDesc').value = '';
+    document.getElementById('itemSku').value = '';
+    document.getElementById('startingBid').value = '';
+    currentImage = null;
+    document.getElementById('previewImage').style.display = 'none';
+}
+
+// Export WooCommerce CSV
+function exportToWooCommerce() {
+    if (items.length === 0) {
+        alert('No items to export!');
+        return;
+    }
+    
+    const header = ['ID', 'Type', 'SKU', 'Name', 'Description', 'Categories', 'Images', 'Auction', 'Starting bid'];
+    const rows = items.map(item => [
+        '', 'auction', item.sku, item.name, item.description, 
+        'Auctions', item.imageUrl, 'yes', item.startingBid
+    ]);
+    
+    const csv = [header, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    
+    // Download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bidbarn_auctions_${Date.now()}.csv`;
+    a.click();
+    
+    document.getElementById('importStatus').textContent = '✅ CSV downloaded!';
+}
+3. main.py - Python backend (Flask/FastAPI)
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses FileResponse, HTMLResponse
+import os
+import json
+import csv
+ pathlib import Path
+from typing import List, Dict
+import aiofiles
+
+app = FastAPI()
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Serve static files
+app.mount("/static", StaticFiles(directory="."), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def get_index():
+    return open("index.html").read()
+
+@app.post("/api/upload-image")
+async def upload_image(file: UploadFile = File(...)):
+    """Handle image uploads from the app"""
+    try:
+        file_path = UPLOAD_DIR / file.filename
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            content = await file.read()
+            await out_file.write(content)
+        
+        # Return WordPress-compatible URL
+        return {
+            "success": True,
+            "image_url": f"https://bidbarn.bid/uploads/{file.filename}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/batch-upload")
+async def batch_upload(items: List[Dict]):
+    """Process batch item upload to WooCommerce"""
+    # Import WooCommerce API
+    from woocommerce import API
+    
+    wcapi = API(
+        url="https://bidbarn.bid",
+        consumer_key="YOUR_WC_CONSUMER_KEY",
+        consumer_secret="YOUR_WC_CONSUMER_SECRET",
+        version="wc/v3"
+    )
+    
+    results = []
+    for item in items:
+        # Upload image to WordPress first
+        image_id = None
+        if item.get('image_url'):
+            # Create product with image
+            data = {
+                "name": item['name'],
+                "sku": item['sku'],
+                "description": item['description'],
+                "regular_price": str(item['starting_bid']),
+                "images": [{"src": item['image_url']}],
+                "meta_data": [{"key": "_auction", "value": "yes"}]
+            }
+        else:
+            data = {
+                "name": item['name'],
+                "sku": item['sku'],
+                "description": item['description'],
+                "regular_price": str(item['starting_bid']),
+                "meta_data": [{"key": "_auction", "value": "yes"}]
+            }
+        
+        response = wcapi.post("products", data)
+        results.append(response.json())
+    
+    return {"success": True, "results": results}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
